@@ -11,8 +11,14 @@ void XUH_Manager(chanend epChans_out[], unsigned epChanCount_out,
 XUH_Ep XUH_InitEp(chanend c);
 
 
-int XUH_SetupTransfer(XUH_Ep ep, unsigned char buffer[8]);
 int XUH_InTransfer(XUH_Ep ep, unsigned char buffer[]);
+
+int XUH_OutTransfer(XUH_Ep ep, unsigned char buffer[], unsigned length);
+int XUH_SetupTransfer(XUH_Ep ep, unsigned char buffer[8]);
+
+/*****/
+
+int XUH_TxTransfer(XUH_Ep ep, unsigned char buffer[], unsigned length, unsigned isSetup);
 
 
 #endif
