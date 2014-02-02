@@ -46,10 +46,8 @@ void XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, u
     
     length = XUH_InTransfer(ep_in, buffer);
 
-    //printintln(length);
-    //for(int i = 0; i < length; i++)
-    //printhexln(buffer[i]);
-    //XUH_OutTransfer(ep, buffer, 0);
+	XUH_OutTransfer(ep_out, spBuffer, 0);
+
 }
 
 void HostTestApp(chanend c_out, chanend c_in)
