@@ -95,7 +95,7 @@ XUH_GenerateSof:
     //eq          r4, r8, 10
     //bt          r4, SetupTest
 
-    ldc         r7, 0x3ff8               // TODO mkmsk
+    ldc         r7, 0x3ff8              // Note, only update frame-number every 8 microframes.
     and         r6, r7, r8              // Mask off 11 bits for frame counter
     shr         r6, r6, 3
     ldaw        r3, dp[crc5Table]       // get CRC5 for framecounter
@@ -124,8 +124,13 @@ XUH_SetupNextFrameTime:
 
 XUH_CheckEPs:
     // Go through ep table and see if any want service
+    // TODO can we think of a better scheme than this?
     ldw        r4, r5[0]                       
-    bt         r4, EpReady_out                   
+    bt         r4, EpReady_out 
+    //ldw        r4, r5[1]                       
+    //bt         r4, EpReady_out                   
+    //ldw        r4, r5[2]                       
+    //bt         r4, EpReady_out 
     ldc        r7, 16
     ldw        r4, r5[r7]                       
     bt         r4, EpReady_In                   
@@ -134,10 +139,9 @@ XUH_WaitForNextFrame:
     waiteu
 
 
-//r
-//r10: sof timer
-//r11: tx port
-EpReady_out:
+.align 64
+.skip 34
+EpReady_out:                        
     // EP is ready, 
     ldc     r9, 0xa001              // CRC poly
     ldc     r7, 0xf335              // TX CRC init
@@ -152,34 +156,245 @@ EpReady_OutputToken:
 EpReady_LoadPid:
     ldw     r11, r4[4]  
     
-    ldw     r8, r4[5]               // load buffer
-   
-    outpw   res[r1], r11, 8         // Output data packet PID
-    ldw     r6, r8[0]               // Output first data word 
-    out     res[r1], r6
-    crc32   r7, r6, r9
+    ldw     r8, r4[5]               // Load buffer
+    ldw     r6, r4[7]               // Load tail length (bytes)
 
-    ldw     r6, r8[1]               // Output second data word 
-    crc32   r7, r6, r9
-    out     res[r1], r6
-    ldc     r6, 0
-    crc32   r7, r6, r9              // CRC 0 step
-    not     r7, r7
-    outpw   res[r1], r7, 16
+    ldw     r3,  r4[6]               // Load buffer index (negative)
+    bf      r3, XUH_SmallOutTransfer
 
+    bru     r6
+  
+.align 64
+.skip 0
+#define TXD r1
+TxTail0:
+    ldw         r6, r8[r3]                      // Load first data word
+    add         r3, r3, 1                       // Buffer index increment
+XUD_IN_TxPid_Tail0:
+    outpw       res[TXD], r11, 8                // Output PID to port
+    out         res[TXD], r6                    // Output first data word
+    crc32       r7, r6, r9                      // Run CRC
+    bf          r3, TxLoop0End
+TxLoop0:
+    ldw         r6, r8[r3]                      // Load last data word
+    add         r3, r3, 1
+TxLoop0_Out:
+    out         res[TXD], r6                    // Output last data word
+    crc32       r7, r6, r9
+    bt          r3, TxLoop0
+TxLoop0End:                                     // Word aligned data (just output CRC)
+    crc32       r7, r3, r9                      // R4: 0 (from bt)
+    not         r7, r7
+
+XUD_IN_TxCrc_Tail0:
+    outpw        res[TXD], r7, 16               // Output CRC
+    bu           DoneTail
+
+.align 64
+.skip 0
+TxTail1:
+    ldw         r6, r8[r4]                      // Load first data word
+    add         r4, r4, 1                       // Buffer index increment
+    // in       r6, res[r5]                     // Get data word
+    // testct   r8, res[r5]
+XUD_IN_TxPid_Tail1:
+    outpw    res[TXD], r11, 8                   // Out PID
+    out      res[TXD], r6
+    crc32         r7, r6, r9
+    //testct   r8, res[r5]
+    bf            r4, TxLoop1End
+TxLoop1:
+    //in       r6, res[r5]                      // Get data word
+    //testct   r11, res[r5]
+    ldw         r6, r8[r4]                      // Load last data word
+    add         r4, r4, 1
+    out         res[TXD], r6
+    crc32       r7, r6, r9
+    bt          r4, TxLoop1
+TxLoop1End:
+    //inct        r6, res[r5]                     // Input end of stream token
+    //in          r6, res[r5]                     // Input tail data
+    ldw         r6, r8[r4]                      // Load last data word
+    outpw       res[TXD], r6, 8
+    crc8        r7, r6, r6, r9
+    crc32       r7, r4, r9                      // r4: 0 (from bf)
+    not         r7, r7
+
+XUD_IN_TxCrc_Tail1:
+    outpw        res[TXD], r7, 16
+    bu           DoneTail
+
+.scheduling off
+.align 64
+.skip 0
+TxTail2:
+    ldw         r6, r8[r4]                        // Load first data word
+    crc32       r7, r6, r9
+XUD_IN_TxPid_Tail2:
+    outpw       res[TXD], r11, 8                   // Out PID
+    out         res[TXD], r6
+    add         r4, r4, 1
+    bf          r4, TxLoop2End
+TxLoop2:
+    ldw         r6, r8[r4]                        // Load first data word
+    add         r4, r4, 1
+    crc32       r7, r6, r9
+    out         res[TXD], r6
+    bt          r4, TxLoop2
+
+TxLoop2End:
+    ldw         r6, r8[r4]                      // Load tail
+    crc8        r7, r11, r6, r9
+    outpw       res[TXD], r6, 16
+    crc8        r7, r11, r11, r9
+    crc32       r7, r4, r9                      // r4: 0 (from bf)
+    not         r7, r7
+
+XUD_IN_TxCrc_Tail2:
+    outpw       res[TXD], r7, 16
+    bu          DoneTail
+
+.align 64
+.skip 0
+TxTail3:
+    ldw         r6, r8[r4]                      // Load first data word
+    add         r4, r4, 1
+XUD_IN_TxPid_Tail3:
+    outpw    res[TXD], r11, 8                   // Out PID
+    out      res[TXD], r6
+    crc32      r7, r6, r9
+    bf         r4, TxLoop3End
+TxLoop3:
+    ldw         r6, r8[r4]                      // Load first data word
+    add         r4, r4, 1
+    crc32       r7, r6, r9
+    out         res[TXD], r6
+    bt          r4, TxLoop3
+TxLoop3End:
+    ldw          r6, r8[r4]                      // Load tail
+    crc8         r7, r11, r6, r9
+    outpw        res[TXD], r6, 24
+    crc8         r7, r11, r11, r9
+    crc8         r7, r11, r11, r9
+    crc32        r7, r4, r9                // r4: 0 (from bf)
+    not          r7, r7
+XUD_IN_TxCrc_Tail3:
+    outpw        res[TXD], r7, 16
+
+DoneTail:
      
-    inpw    r11, res[r0], 8        // TODO: Timeout
+    inpw    r11, res[r0], 8         // TODO: Timeout
                                     // TODO: Check for valid ACK (could be STALL or NAK)
 
-    ldc     r11, 0
-    stw     r11, r5[0]              // Clear ready
+    shr     r11, r11, 24
+    ldc     r9, USB_PIDn_NAK        // TODO rather than checking for not NACK, check for PID expected?
+    eq      r9, r9, r11
+    bt      r9, XUH_OutNak
+
+
+    //ldc     r11, 0
+    stw     r9, r5[0]               // Clear ready
     ldw     r11, r4[1]              // load chanend
     out     res[r11], r11
 
+XUH_OutNak:
     //bu XUH_SetupNextFrameTime
     waiteu
 
-//    waiteu
+
+.align 32
+.skip 28
+XUH_SmallOutTransfer:
+SmallTxPacket:
+    ldw          r8, r8[r3]                        // Load first data word
+    
+    .xtabranch TxTail0s, TxTail1s, TxTail2s, TxTail3s
+    bru         r6                              // branch taillength
+
+//--------------------------------------------------------------------------
+.align 64
+.skip 0
+TxTail0s:                                       // We know this is a < 4 byte packet, so is 0 length packet
+                                                // So crc = 0. Note our normal crc calculation works for this, it is
+                                                //not a special CRC case, but helps with timing.
+    ldc        r8, 0
+XUD_IN_TxPid_TailS0:
+    outpw      res[TXD], r11, 8                 // PID
+    //crc32    r7, r11, r9                      // r11: 0
+    //not      r7, r7
+
+XUD_IN_TxCrc_TailS0:
+    outpw      res[TXD], r8, 16                 // r5: 0
+    bu         DoneTail
+
+.align 64
+.skip 0
+TxTail1s:
+    ldc        	r6, 0
+    // One tail byte
+    shl 		r8, r8, 8                       // Concat PID and Data
+    or  		r11, r11, r8
+    shr 		r8, r8, 8
+    crc8        r7, r4, r8, r9
+    crc32       r7, r6, r9               		// r5: 0
+    not         r7, r7
+
+XUD_IN_TxPid_TailS1:
+    outpw     	res[TXD], r11, 16        		// PID
+    ///outpw       res[TXD], r6, 16
+XUD_IN_TxCrc_TailS1:
+    outpw       res[TXD], r7, 16
+    bu           DoneTail
+
+.align 64
+.skip 0
+TxTail2s:
+    ldc        r6, 0
+    // Two tail byte
+    shl         r8, r8, 8
+    or          r11, r11, r8
+    shr         r8, r8, 8
+    //outpw     res[TXD], r11, 8        // PID
+    //outpw        res[TXD], r6, 16
+
+    crc8         r7, r8, r8, r9
+    crc8         r7, r8, r8, r9
+    crc32        r7, r6, r9               // r5: 0
+    not          r7, r7
+    shr          r6, r7, 8
+
+    shl        r7, r7, 24
+    zext       r11, 24
+    or         r11, r11, r7
+XUD_IN_TxPid_TailS2:
+    out     res[TXD], r11
+//    outpw        res[TXD], r7, 16
+
+XUD_IN_TxCrc_TailS2:
+    outpw      res[TXD], r6, 8
+    bu           DoneTail
+
+.align 64
+.skip 0
+TxTail3s:
+    ldc        r6, 0
+	// Two tail byte
+XUD_IN_TxPid_TailS3:
+  outpw        res[TXD], r11, 8         // PID
+  outpw        res[TXD], r8, 24
+  crc8         r7, r8, r8, r9
+  crc8         r7, r8, r8, r9
+  crc8         r7, r8, r8, r9
+
+  crc32        r7, r6, r9               // r5: 0
+  not          r7, r7
+
+XUD_IN_TxCrc_TailS3:
+  outpw        res[TXD], r7, 16
+  bu           DoneTail
+
+    waiteu
+
 
 ////////////////////
 
