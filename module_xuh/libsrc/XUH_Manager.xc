@@ -238,7 +238,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
  	configure_out_port_handshake(p_usb_txd, tx_readyin, tx_readyout, tx_usb_clk, 0);
   	configure_in_port_strobed_slave(p_usb_rxd, rx_rdy, rx_usb_clk);
 
-    printstr("Enable USB...");
+    //printstr("Enable USB...");
 #ifdef ARCH_S
         /* Enable the USB clock */
         write_sswitch_reg(get_tile_id(USB_TILE_REF), XS1_GLX_CFG_RST_MISC_ADRS, ( ( 1 << XS1_GLX_CFG_USB_CLK_EN_BASE ) ) );
@@ -252,20 +252,20 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 #else
 // TODO
 #endif
-   printstrln("ok");
+  // printstrln("ok");
     t :> time;
-    printstr("wait for USB Clock..(");
-    printint(time);
-    printstr(")\n");
+    //printstr("wait for USB Clock..(");
+    //printint(time);
+    //printstr(")\n");
     /* Wait for USB clock (typically 1ms after reset) */
     p_usb_clk when pinseq(1) :> int _;
     p_usb_clk when pinseq(0) :> int _;
     p_usb_clk when pinseq(1) :> int _;
     p_usb_clk when pinseq(0) :> int _; 
     t :> time;
-    printstr("ok (");
-    printint(time);
-    printstr(")\n");
+   // printstr("ok (");
+    //printint(time);
+    //printstr(")\n");
 
     // Turn on pulldowns TODO and VBUS?
     settings[0] = XS1_SU_UIFM_OTG_CONTROL_DPPULLDOWN_SET(0, 1);
@@ -297,35 +297,35 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
       switch (state)
       {
         case STATE_IDLE:
-            printstr("IDLE: ");
+            //printstr("IDLE: ");
             select
             {
                 case flag0_port when pinsneq(0) :> void:
-                    printstr("STATE_VP\n");
+              //      printstr("STATE_VP\n");
                     nextState = STATE_VP;
                     break;
                 case flag1_port when pinsneq(0) :> void:
                     nextState = STATE_VM;
-                    printstr("STATE_VM\n");
+                //    printstr("STATE_VM\n");
                     break;
             }
             break;
         case STATE_VP: // Full Speed
             sof_timer :> time;
             time += CONNECT_DEBOUNCE;
-            printstr("STATE_VP: ");
+           // printstr("STATE_VP: ");
             select
             {
                 case flag0_port when pinsneq(1) :> void:
                     nextState = STATE_IDLE;
-                    printstr("STATE_IDLE\n");
+             //       printstr("STATE_IDLE\n");
                     break;
                 case flag1_port when pinsneq(0) :> void:
                     nextState = STATE_IDLE;
-                    printstr("STATE_IDLE\n");
+               //     printstr("STATE_IDLE\n");
                     break;
                 case sof_timer when timerafter(time) :> void:
-                    printstr("EXIT\n");
+                 //   printstr("EXIT\n");
                     retVal = 0;
                     break;
             }
@@ -385,7 +385,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
          p_usb_txd <: 0x0;
     }
  
-   // printstr("HS!!\n");
+     //printstr("HS!!\n");
     
 
 
