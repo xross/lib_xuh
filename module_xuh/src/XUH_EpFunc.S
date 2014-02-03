@@ -154,6 +154,7 @@ XUH_SetupTransfer_StoreToken:
    // bt          r11, XUH_SetupTransfer_Reset
 
     in          r11, res[r10]                   // Data sent okay
+    in          r11, res[r10]                   // Data sent okay
 
 //XUH_SetupTransfer_LoadEpType:
   //  ldw         r11, r0[5]                      // Don't do any toggling for ISO
@@ -212,8 +213,11 @@ XUH_InTransfer:
     ldw        r10, r0[2]                       // Load channel for us to use
 
     in         r0, res[r10]                  // get length over channel
-    
+    in         r1, res[r10]                     // Tail length
+    shr        r1, r1, 3   
     shl        r0, r0, 2
+    add        r0, r1, r0
+    sub        r0, r0, 2                    // Length correction for CRC
 
 XUH_InTransfer_ReturnOk:
     ldw         r10, sp[2]

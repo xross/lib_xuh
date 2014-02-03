@@ -325,6 +325,9 @@ XUD_IN_TxPid_TailS0:
 
 XUD_IN_TxCrc_TailS0:
     outpw      res[TXD], r8, 16                 // r5: 0
+    nop
+    nop
+    nop
     bu         DoneTail
 
 .align 64
@@ -393,9 +396,6 @@ XUD_IN_TxCrc_TailS3:
   outpw        res[TXD], r7, 16
   bu           DoneTail
 
-    waiteu
-
-
 ////////////////////
 
 EpReady_In:
@@ -416,6 +416,8 @@ EpReady_In_OutputToken:
     waiteu
 ////////////////////////
 
+.align 32
+.skip 4
 GotData:
                                     // r9 is 0 from bf above
     ldw     r11, dp[flag1_port]     // enable events on RXA
@@ -423,16 +425,41 @@ GotData:
     setsr   1                       // Enable thread events
 
 XUH_NextInWord:                     // Rx loop
-    in      r11, res[r0]
-    stw     r11, r6[r9] 
+    in      r10, res[r0]
+    stw     r10, r6[r9] 
     add     r9, r9, 1
                                     // TODO: CRC 
     bu      XUH_NextInWord
 
 XUH_RxALow:                         // Framing signal low 
-    clre                            // TODO endin
-    ldc     r8, USB_PIDn_ACK        // TODO check CRC
-    outpw   res[r1], r8, 8          // Output ACK:
+    clre                            // TODO deal with tail!
+    in      r11, res[r11]
+    endin   r8, res[r0]
+    in      r11, res[r0]
+
+    bru     r8
+
+.align 16
+OutTail0:   
+    nop
+
+.align 16
+OutTail1:
+    shr     r8, r8, 24
+    stw     r11, r6[r9] 
+
+.align 16
+OutTail2:
+    shr     r8, r8, 16
+    stw     r11, r6[r9] 
+
+.align 16
+OutTail3:
+    shr     r8, r8, 8
+    stw     r11, r6[r9] 
+
+    ldc     r11, USB_PIDn_ACK        // TODO check CRC
+    outpw   res[r1], r11, 8          // Output ACK:
  
     ldc     r10, 0                  // TODO in from RXA to get this 0?
     ldc     r11, 16                 // TODO, hardcoded ep0
@@ -440,7 +467,7 @@ XUH_RxALow:                         // Framing signal low
    
     ldw     r11, r4[1]              // Load EP chanend
     out     res[r11], r9            // Output length (words)
-                                    // TODO output tail (bits)
+    out     res[r11], r8            // Outout tail length (bits)
     eeu     res[r2]                 // Re-enable events on timer
     waiteu                          // Back to SOF generation
 
