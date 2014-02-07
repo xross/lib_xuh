@@ -296,8 +296,10 @@ DoneTail:
     bt      r9, XUH_OutNak
 
 
-    //ldc     r11, 0
-    stw     r9, r5[0]               // Clear ready
+    //ldc     r11, 0                // TODO CURRENTLY clearing EP0?
+    //stw     r9, r5[0]               // Clear ready 
+    ldw     r11, r4[0]              // note, potentially wasted 1 inst here?
+    stw     r9, r11[0]
     ldw     r11, r4[1]              // load chanend
     out     res[r11], r11
 
