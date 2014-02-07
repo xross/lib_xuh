@@ -261,26 +261,26 @@ XUD_IN_TxCrc_Tail2:
 .align 64
 .skip 0
 TxTail3:
-    ldw         r6, r8[r4]                      // Load first data word
-    add         r4, r4, 1
+    ldw         r6, r8[r3]                      // Load first data word
+    add         r3, r3, 1
 XUD_IN_TxPid_Tail3:
     outpw    res[TXD], r11, 8                   // Out PID
     out      res[TXD], r6
     crc32      r7, r6, r9
-    bf         r4, TxLoop3End
+    bf         r3, TxLoop3End
 TxLoop3:
-    ldw         r6, r8[r4]                      // Load first data word
-    add         r4, r4, 1
+    ldw         r6, r8[r3]                      // Load first data word
+    add         r3, r3, 1
     crc32       r7, r6, r9
     out         res[TXD], r6
-    bt          r4, TxLoop3
+    bt          r3, TxLoop3
 TxLoop3End:
-    ldw          r6, r8[r4]                      // Load tail
+    ldw          r6, r8[r3]                      // Load tail
     crc8         r7, r11, r6, r9
     outpw        res[TXD], r6, 24
     crc8         r7, r11, r11, r9
     crc8         r7, r11, r11, r9
-    crc32        r7, r4, r9                // r4: 0 (from bf)
+    crc32        r7, r3, r9                // r4: 0 (from bf)
     not          r7, r7
 XUD_IN_TxCrc_Tail3:
     outpw        res[TXD], r7, 16
