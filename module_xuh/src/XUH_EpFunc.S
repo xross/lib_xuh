@@ -23,7 +23,8 @@ XUH_TxTransfer_StoreToken_Setup:
     ldaw       r11, dp[Token_Setup]
 
 XUH_TxTransfer_StoreToken:
-    ldw         r11, r11[0]                     // TODO - USE EP NUMBER!!
+    ldw         r5, r0[8]                      // Load EP address
+    ldw         r11, r11[r5]                    
     
     stw         r11, r0[3]                      // Store token
 //XUH_SetupTransfer_NoReq:
@@ -203,8 +204,9 @@ XUH_InTransfer:
     ldw        r4, r0[0]                        // Load mem address of EP structure
     stw        r1, r0[5]                        // Store buffer addr
 
+    ldw         r2, r0[8]                      // Load EP address
     ldaw        r11, dp[Token_In]
-    ldw         r11, r11[0]                         // TODO - USE EP NUMBER!!
+    ldw         r11, r11[r2]                         
     
     stw         r11, r0[3]                          // Store token
     
