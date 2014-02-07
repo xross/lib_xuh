@@ -127,13 +127,17 @@ XUH_CheckEPs:
     // TODO can we think of a better scheme than this?
     ldw        r4, r5[0]                       
     bt         r4, EpReady_out 
-    //ldw        r4, r5[1]                       
-    //bt         r4, EpReady_out                   
-    //ldw        r4, r5[2]                       
-    //bt         r4, EpReady_out 
+    ldw        r4, r5[1]                       
+    bt         r4, EpReady_out                   
+    ldw        r4, r5[2]                       
+    bt         r4, EpReady_out                   
     ldc        r7, 16
     ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In                   
+    bt         r4, EpReady_In   
+
+    ldc        r7, 17
+    ldw        r4, r5[r7]                       
+    bt         r4, EpReady_In                 
 
 XUH_WaitForNextFrame:
     waiteu
