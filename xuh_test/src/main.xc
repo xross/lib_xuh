@@ -12,6 +12,23 @@
 
 out port p_gpio = XS1_PORT_32A;
 
+void delay(unsigned x)
+{
+    timer t;
+    unsigned time;
+    t :> time;
+    t when timerafter(time + x) :> void;
+}
+
+/* TODO 
+ * - It is annoying that EP's are hard coded.  Would be good if could assign an Address to an EP 
+ * - Multiple transfers per frame
+ * - Do we really need to do all the token loading/storing?
+ */
+
+extern void MassStorage(XUH_Ep ep_out2, XUH_Ep ep_in1);
+
+
 void UnUnicode(unsigned char buffer[])
 {
     int length = buffer[0];
@@ -78,7 +95,7 @@ int  XUH_GetDescriptor(XUH_Ep ep_out, XUH_Ep ep_in, unsigned char buffer[], unsi
     return XUH_ControlTransfer_In(ep_out, ep_in, sp, buffer);
 }
 
-void HostTestApp(chanend c_out, chanend c_in)
+void HostTestApp(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
 {
     USB_BmRequestType_t bmRequestType;
     USB_SetupPacket_t sp;
@@ -89,7 +106,9 @@ void HostTestApp(chanend c_out, chanend c_in)
     int tmp;
 
     XUH_Ep ep_out = XUH_InitEp(c_out);
+    XUH_Ep ep_out2 = XUH_InitEp(c_out2);
     XUH_Ep ep_in = XUH_InitEp(c_in);
+    XUH_Ep ep_in1 = XUH_InitEp(c_in1);
     
     /* Attempt to do a GetDesc(Device) */ 
     length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 64, 0);
@@ -132,12 +151,12 @@ void HostTestApp(chanend c_out, chanend c_in)
     length = XUH_InTransfer(ep_in, buffer);
 
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
-    //MassStorage();
+    MassStorage(ep_out2, ep_in1);
 
     while(1);    
 
 }
-#define NUM_EPS 1
+#define NUM_EPS 3
 
 int main()
 {
@@ -152,6 +171,6 @@ int main()
     {
         XUH_Manager(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS);
 
-        HostTestApp(xuhChans_out[0], xuhChans_in[0]);
+        HostTestApp(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2], xuhChans_in[1]);
     }
 }
