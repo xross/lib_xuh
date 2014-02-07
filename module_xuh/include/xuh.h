@@ -2,6 +2,8 @@
 #ifndef _XUH_H_
 #define _XUH_H_ 1
 
+#include <xccompat.h>
+
 typedef unsigned int XUH_Ep;
 
 void XUH_Manager(chanend epChans_out[], unsigned epChanCount_out, 
