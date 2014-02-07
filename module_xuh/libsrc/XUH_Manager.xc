@@ -30,7 +30,8 @@ typedef struct XUH_ep_info
     unsigned int data_pid;              // 4 Data packet.data_pid
     unsigned int buffer_addr;           // 5 
     unsigned int word_length;           // 6
-    unsigned int tail_length_bytes      // 7
+    unsigned int tail_length_bytes;     // 7
+    unsigned int ep_addr;               // 8            
 } XUH_ep_info;
 
 XUH_ep_info ep_info[XUH_MAX_EPS * 2];
@@ -157,6 +158,10 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
         asm("ldaw %0, %1[%2]":"=r"(x):"r"(ep_info),"r"(i*sizeof(XUH_ep_info)/sizeof(unsigned)));
  
         ep_info[i].data_pid = USB_PIDn_DATA0;
+
+        ep_info[i].token = Token_Setup[i];
+        
+        ep_info[i].ep_addr = i;
         
         /* Send memory address of EP struct over channel */
         outuint(c_ep_out[i], x);
@@ -178,6 +183,8 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
         ep_info[XUH_MAX_EPS+i].ep_client_chanend = x;
         
         ep_info[i+XUH_MAX_EPS].data_pid = USB_PIDn_DATA0;
+        
+        ep_info[i+XUH_MAX_EPS].ep_addr = i;
         
         /* Load memmory address */	  
         asm("ldaw %0, %1[%2]":"=r"(x):"r"(ep_info),"r"((i+XUH_MAX_EPS)*sizeof(XUH_ep_info)/sizeof(unsigned)));
