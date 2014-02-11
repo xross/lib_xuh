@@ -288,7 +288,7 @@ XUD_IN_TxCrc_Tail3:
 DoneTail:
      
     inpw    r11, res[r0], 8         // TODO: Timeout
-                                    // TODO: Check for valid ACK (could be STALL or NAK)
+                                    // TODO: Check for valid ACK (could be STALL or NAK or NYET)
 
     shr     r11, r11, 24
     ldc     r9, USB_PIDn_NAK        // TODO rather than checking for not NACK, check for PID expected?
