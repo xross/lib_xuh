@@ -56,7 +56,7 @@ unsigned Token_In[XUH_MAX_EPS];
 unsigned Token_Out[XUH_MAX_EPS];
 
 /* CRC[23:19], EP[18:15], Addr[14:8], PID[7:0] */ 
-static void GenerateTokens()
+void GenerateTokens()
 {
     for(int i = 0; i<XUH_MAX_EPS; i++) 
     {

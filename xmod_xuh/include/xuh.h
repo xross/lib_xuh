@@ -18,6 +18,7 @@ int XUH_InTransfer(XUH_Ep ep, unsigned char buffer[]);
 int XUH_OutTransfer(XUH_Ep ep, unsigned char buffer[], unsigned length);
 int XUH_SetupTransfer(XUH_Ep ep, unsigned char buffer[8]);
 
+void XUH_SetDeviceAddress(int address);
 /*****/
 
 int XUH_TxTransfer(XUH_Ep ep, unsigned char buffer[], unsigned length, unsigned isSetup);

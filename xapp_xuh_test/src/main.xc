@@ -12,6 +12,9 @@
 
 out port p_gpio = XS1_PORT_32A;
 
+
+#define DEV_ADDR 3
+
 void delay(unsigned x)
 {
     timer t;
@@ -22,11 +25,10 @@ void delay(unsigned x)
 
 /* TODO 
  * - It is annoying that EP's are hard coded.  Would be good if could assign an Address to an EP 
- * - Multiple transfers per frame
  * - Do we really need to do all the token loading/storing?
  */
 
-extern void MassStorage(XUH_Ep ep_out2, XUH_Ep ep_in1);
+extern void MassStorage(XUH_Ep ep0_out, XUH_Ep ep0_in, XUH_Ep ep_out2, XUH_Ep ep_in1);
 
 
 void UnUnicode(unsigned char buffer[])
@@ -75,6 +77,31 @@ int XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, un
     return length;
 }
 
+int XUH_SetAddress(XUH_Ep ep_out, XUH_Ep ep_in, int addr)
+{ 
+    unsigned char spBuffer[MAX_EP0_PKT_SIZE];
+    unsigned length;
+    USB_SetupPacket_t sp;
+    USB_BmRequestType_t bmRequestType;
+    
+    bmRequestType.Recipient = USB_BM_REQTYPE_RECIP_DEV;
+    bmRequestType.Type = USB_BM_REQTYPE_TYPE_STANDARD;
+    bmRequestType.Direction = USB_BM_REQTYPE_DIRECTION_H2D;
+   
+    sp.bRequest = USB_SET_ADDRESS;
+    sp.wValue = addr;
+
+    sp.wIndex = 0;
+    sp.wLength = 0;
+    
+    ComposeSetupBuffer(sp, spBuffer);
+    XUH_SetupTransfer(ep_out, spBuffer);
+    length = XUH_InTransfer(ep_in, spBuffer);
+
+    /* SetAddress in Host */
+    XUH_SetDeviceAddress(addr);
+}
+
 
 int  XUH_GetDescriptor(XUH_Ep ep_out, XUH_Ep ep_in, unsigned char buffer[], unsigned descReq, unsigned wLength, unsigned wIndex)
 {
@@ -110,9 +137,15 @@ void HostTestApp(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     XUH_Ep ep_in = XUH_InitEp(c_in);
     XUH_Ep ep_in1 = XUH_InitEp(c_in1);
     
+    delay(100000000);
     /* Attempt to do a GetDesc(Device) */ 
-    length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 64, 0);
+    length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 18,  0);
+    //length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 64, 0);
 
+    XUH_SetAddress(ep_out, ep_in, DEV_ADDR);
+
+    length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 64, 0);
+    
     tmp = buffer[USB_DEV_DESC_IPRODUCT];
 
     length = XUH_GetDescriptor(ep_out, ep_in, productString,  USB_WVALUE_GETDESC_STRING | tmp, 64, 0);
@@ -150,8 +183,10 @@ void HostTestApp(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     
     length = XUH_InTransfer(ep_in, buffer);
 
+    delay(100000000);
+    
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
-    MassStorage(ep_out2, ep_in1);
+    MassStorage(ep_out, ep_in, ep_out2, ep_in1);
 
     while(1);    
 

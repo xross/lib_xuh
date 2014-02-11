@@ -21,6 +21,8 @@ XUH_TxTransferRetry:
 
 XUH_TxTransfer_StoreToken_Setup:
     ldaw       r11, dp[Token_Setup]
+    ldc        r10, USB_PIDn_DATA0             // Reset PID for setup
+    stw        r10, r0[4]     
 
 XUH_TxTransfer_StoreToken:
     ldw         r5, r0[8]                      // Load EP address
