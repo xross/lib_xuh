@@ -14,6 +14,8 @@ Uses the XMOS build-system.
 Todo
 ----
 
+* Add assignable EP numbers
+
 
 Support
 -------
