@@ -14,7 +14,7 @@ BUILD_FLAGS     = -DFLASH_MAX_UPGRADE_SIZE=64*1024 -fcomment-asm -Xmapper --map 
 # The USED_MODULES variable lists other module used by the application. These
 # modules will extend the SOURCE_DIRS, INCLUDE_DIRS and LIB_DIRS variables. 
 # Modules are expected to be in the directory above the BASE_DIR directory.
-USED_MODULES = xmod_xuh module_usb_shared module_xux_support module_FatFs
+USED_MODULES = xmod_xuh module_usb_shared xmod_fatfs xlib_xuh xmod_usb_host
 
 MODULE_LIBRARIES = xuh_u
 
