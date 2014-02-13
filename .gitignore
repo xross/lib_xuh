@@ -1,12 +1,5 @@
-*/.build_*/*
-*/bin/*
+./build/*
 *~
-*.o
-*.xe
-*.vcd
-*.xi
-*.i
-*.a
-*.swp
 *.*~
-*.sw*
+*.swp
+*.swo
