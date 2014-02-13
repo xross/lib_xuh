@@ -15,6 +15,7 @@ Todo
 ----
 
 * Add assignable EP numbers
+* Doesn't deal with NYET (in reply to OUT transfer)
 
 
 Support
