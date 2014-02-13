@@ -137,7 +137,15 @@ XUH_CheckEPs:
 
     ldc        r7, 17
     ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In                 
+    bt         r4, EpReady_In  
+
+    ldc        r7, 18
+    ldw        r4, r5[r7]                       
+    bt         r4, EpReady_In  
+
+     ldc        r7, 19
+    ldw        r4, r5[r7]                       
+    bt         r4, EpReady_In               
 
 XUH_WaitForNextFrame:
     waiteu
