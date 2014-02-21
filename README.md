@@ -19,7 +19,7 @@ Uses the XMOS build-system.
 
 ## Todo
 
-* Add assignable EP numbers
+* Add assignable EP addresses (i.e. XUH has a bunch of EP resource and the higher-level can assign an address
 * Doesn't deal with NYET (in reply to OUT transfer)
 * Only performs on tranfer per micro-frame
 * Detect device disconnects
