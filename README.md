@@ -6,14 +6,14 @@ This USB Host (XUH) xmod provides a low-level interface to USB.
 Currently private and intended to be distributed in library form (see xlib_xud)
 until permission is granted to open-source by XMOS.
 
-# Disclaimer
+## Disclaimer
 
 Use at your own risk. We do not accept responsibility of any damage to hardware
 while using this code.
 
 This is not officially endorsed by XMOS.
 
-# Building 
+## Building 
 
 Uses the XMOS build-system.
 
@@ -30,3 +30,4 @@ Uses the XMOS build-system.
 Please use the issue tracker
 
 ## Required software (dependencies)
+
