@@ -19,6 +19,13 @@ XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
 XUH_Ep g_ep_out0;
 
+void USBH_MSC_Init()
+{
+
+    // DO nothing 
+}
+
+
 void delay(unsigned x);
 void ComposeSetupBuffer(USB_SetupPacket_t *sp, unsigned char buffer[8]);
 
@@ -215,9 +222,6 @@ int XUH_MSDSCSIMediaInitialise()
 
     g_capacity = lbaddr;
     g_blocksize = lnlen;
-   // printintln(lbaddr);
-    //printintln(lnlen);
-
 }
 
 int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
