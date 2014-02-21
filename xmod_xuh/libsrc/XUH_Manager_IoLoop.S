@@ -1,4 +1,3 @@
-
 #include <xs1.h>
 
 
@@ -112,7 +111,7 @@ XUH_GenerateSof:
     outpw       res[r1], r7, 24        // Output SOF
     syncr       res[r1]
 
-    add         r8, r8, 1               // Increment frame counter  // TODO Only increment every 8 times
+    add         r8, r8, 1               // Increment frame counter
     stw         r8, dp[sofCounter]      // Store back SOF counter
 
                                         // Check what each ep wants to do..
