@@ -8,13 +8,20 @@ APP_NAME =
 SOURCE_DIRS = src
 
 # The flags passed to xcc when building the application
-BUILD_FLAGS     = -DFLASH_MAX_UPGRADE_SIZE=64*1024 -fcomment-asm -Xmapper --map -Xmapper MAPFILE -Wall -O3 -report -lflash -fsubword-select -save-temps -g -DTEST_MODE_SUPPORT -fxscope -DXSCOPE -DXUD_SERIES_SUPPORT=1
+BUILD_FLAGS     = -DFLASH_MAX_UPGRADE_SIZE=64*1024 -fcomment-asm -Xmapper --map -Xmapper MAPFILE -Wall -O3 -report -lflash -fsubword-select -save-temps -g -DTEST_MODE_SUPPORT -DXUD_SERIES_SUPPORT=1 -DDEBUG=1
 #-fschedule
 
 # The USED_MODULES variable lists other module used by the application. These
 # modules will extend the SOURCE_DIRS, INCLUDE_DIRS and LIB_DIRS variables. 
 # Modules are expected to be in the directory above the BASE_DIR directory.
-USED_MODULES = xmod_xuh module_usb_shared xmod_fatfs xlib_xuh xmod_usb_host
+
+BUILD_LIB ?= 0
+
+ifeq ($(BUILD_LIB), 1)
+USED_MODULES = xmod_xuh xmod_fatfs xmod_usb_host module_usb_shared xlib_xuh
+else
+USED_MODULES = xmod_fatfs xmod_usb_host module_usb_shared xlib_xuh
+endif
 
 MODULE_LIBRARIES = xuh_u
 
