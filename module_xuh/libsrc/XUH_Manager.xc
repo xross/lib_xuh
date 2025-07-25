@@ -28,10 +28,10 @@ typedef struct XUH_ep_info
     unsigned int ep_client_chanend;     // 2 Destination of chanend (client uses this)
     unsigned int token;                 // 3 Token to tx i.e. SETUP, OUT, IN
     unsigned int data_pid;              // 4 Data packet.data_pid
-    unsigned int buffer_addr;           // 5 
+    unsigned int buffer_addr;           // 5
     unsigned int word_length;           // 6
     unsigned int tail_length_bytes;     // 7
-    unsigned int ep_addr;               // 8            
+    unsigned int ep_addr;               // 8
 } XUH_ep_info;
 
 XUH_ep_info ep_info[XUH_MAX_EPS * 2];
@@ -49,23 +49,23 @@ unsigned devAddr = 0;
 #define USB_PIDn_IN                     0x69
 #define USB_PIDn_SOF                    0xa5
 #define USB_PIDn_SETUP                  0x2d
-#define USB_PIDn_DATA0                  0xc3 
+#define USB_PIDn_DATA0                  0xc3
 
 unsigned Token_Setup[XUH_MAX_EPS];
 unsigned Token_In[XUH_MAX_EPS];
 unsigned Token_Out[XUH_MAX_EPS];
 
-/* CRC[23:19], EP[18:15], Addr[14:8], PID[7:0] */ 
+/* CRC[23:19], EP[18:15], Addr[14:8], PID[7:0] */
 void GenerateTokens()
 {
-    for(int i = 0; i<XUH_MAX_EPS; i++) 
+    for(int i = 0; i<XUH_MAX_EPS; i++)
     {
         unsigned data = (i << 7) | devAddr;
         unsigned char  crc5 = crc5Table[data];
-        
-        Token_Setup[i] = (crc5 << 19) | (data << 8) | USB_PIDn_SETUP;   
-        Token_Out[i] = (crc5 << 19) | (data << 8) | USB_PIDn_OUT;   
-        Token_In[i] = (crc5 << 19) | (data << 8) | USB_PIDn_IN;   
+
+        Token_Setup[i] = (crc5 << 19) | (data << 8) | USB_PIDn_SETUP;
+        Token_Out[i] = (crc5 << 19) | (data << 8) | USB_PIDn_OUT;
+        Token_In[i] = (crc5 << 19) | (data << 8) | USB_PIDn_IN;
     }
 }
 
@@ -126,7 +126,7 @@ extern port p_usb_rxd       ;
 extern tileref usb_tile;
 #define xs1_su usb_tile
 #define USB_TILE_REF usb_tile
-void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out, 
+void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
                  chanend c_ep_in[], unsigned epChanCount_in)
 {
     timer t;
@@ -150,23 +150,23 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
         asm("mov %0, %1":"=r"(x):"r"(c_ep_out[i]));
         ep_info[i].ep_xud_chanend = x;
-  
+
         asm("getd %0, res[%1]":"=r"(x):"r"(c_ep_out[i]));
-        ep_info[i].ep_client_chanend = x;      
-  
-        /* Load memmory address */	  
+        ep_info[i].ep_client_chanend = x;
+
+        /* Load memmory address */
         asm("ldaw %0, %1[%2]":"=r"(x):"r"(ep_info),"r"(i*sizeof(XUH_ep_info)/sizeof(unsigned)));
- 
+
         ep_info[i].data_pid = USB_PIDn_DATA0;
 
         ep_info[i].token = Token_Setup[i];
-        
+
         ep_info[i].ep_addr = i;
-        
+
         /* Send memory address of EP struct over channel */
         outuint(c_ep_out[i], x);
     }
-    
+
     for(int i = 0; i < epChanCount_in; i++)
     {
         int x;
@@ -181,14 +181,14 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
         asm("getd %0, res[%1]":"=r"(x):"r"(c_ep_in[i]));
         ep_info[XUH_MAX_EPS+i].ep_client_chanend = x;
-        
+
         ep_info[i+XUH_MAX_EPS].data_pid = USB_PIDn_DATA0;
-        
+
         ep_info[i+XUH_MAX_EPS].ep_addr = i;
-        
-        /* Load memmory address */	  
+
+        /* Load memmory address */
         asm("ldaw %0, %1[%2]":"=r"(x):"r"(ep_info),"r"((i+XUH_MAX_EPS)*sizeof(XUH_ep_info)/sizeof(unsigned)));
-        
+
         /* Send memory address of EP struct over channel */
         outuint(c_ep_in[i], x);
     }
@@ -223,9 +223,9 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
   // Handshaken ports need USB clock
   configure_clock_src (tx_usb_clk, p_usb_clk);
   configure_clock_src (rx_usb_clk, p_usb_clk);
-  
-  //this along with the following delays forces the clock 
-  //to the ports to be effectively controlled by the 
+
+  //this along with the following delays forces the clock
+  //to the ports to be effectively controlled by the
   //previous usb clock edges
   set_port_inv(p_usb_clk);
   set_port_sample_delay(p_usb_clk);
@@ -235,8 +235,8 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
 
   set_clock_fall_delay(tx_usb_clk, TX_FALL_DELAY);
-  
-  //this delay th capture of the rdyIn and data. 
+
+  //this delay th capture of the rdyIn and data.
   set_clock_rise_delay(rx_usb_clk, RX_RISE_DELAY);
   set_clock_fall_delay(rx_usb_clk, RX_FALL_DELAY);
 
@@ -268,7 +268,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     p_usb_clk when pinseq(1) :> int _;
     p_usb_clk when pinseq(0) :> int _;
     p_usb_clk when pinseq(1) :> int _;
-    p_usb_clk when pinseq(0) :> int _; 
+    p_usb_clk when pinseq(0) :> int _;
     t :> time;
    // printstr("ok (");
     //printint(time);
@@ -285,7 +285,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 1);
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 1);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
-        
+
     // Ensure line state decoding is disabled FIXME this is just for debug
     // RSO: Enabled linestate decoding to detect chirp
     settings[0] = XS1_SU_UIFM_IFM_CONTROL_DECODELINESTATE_SET(0, 1);
@@ -296,7 +296,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     settings[0] = XS1_SU_UIFM_FLAGS_MASK_MASK1_SET(settings[0], /*UIFM_IFM_FLAGS_LS1_DM*/0x8);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_MASK_NUM, 1, settings);
 
-    printstr("Waiting for device...\n");
+    //printstr("XUH waiting for device...\n");
 
   // Check DP/DM states for a device
   while (retVal < 0)
@@ -365,7 +365,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
     //else
       ///  printstr("FULL speed dev detected!\n");
-    
+
     // Drive SE0 on the bus (D+ and D- connected to ground via 45ohm resistors)
     // Set opmode to 0b10 for connrect chirp transmit and receive
     // OpMode: 0b10, TermSelect and XcvrSelect 0
@@ -379,21 +379,21 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
     /* Wait for end of K chirp from device.. */
     flag1_port when pinseq(0) :> void;
-    
+
 
     /* Chirp back to device */
 #define HOST_CHIRP_LENGTH 700
     for(int i = 0; i< 30; i++)
-    {   
+    {
         for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
          p_usb_txd <: 0xffffffff;
-        
+
         for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
          p_usb_txd <: 0x0;
     }
- 
+
      //printstr("HS!!\n");
-    
+
 
 
     /* go back to normal termination */
@@ -408,7 +408,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
 
-#if 0 
+#if 0
     /* do some sofs... */
     t :> time;
     //for(int i = 0; i < 100; i++)

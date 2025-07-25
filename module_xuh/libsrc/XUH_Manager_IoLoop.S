@@ -4,6 +4,7 @@
 #define USB_PIDn_SOF                    0xa5
 #define USB_PIDn_ACK                    0xd2
 #define USB_PIDn_NAK                    0x5a
+#define USB_PIDn_NYET                   0x1e
 
 #define XUH_FRAME_TIME                      12500
 
@@ -32,7 +33,7 @@ XUH_FrameTime:
 .cc_top XUH_IoLoop.func, XUH_IoLoop
 .text
 XUH_IoLoop:
-    entsp       XUH_IOLOOP_STACKEXTEND 
+    entsp       XUH_IOLOOP_STACKEXTEND
     stw         r4, sp[1]
     stw         r5, sp[2]
     stw         r6, sp[3]
@@ -40,11 +41,11 @@ XUH_IoLoop:
     stw         r8, sp[5]
     stw         r9, sp[6]
     stw         r10, sp[7]
-    
+
     clre
 XUH_SetupRxdPortEvent:
     ldw         r9, dp[p_usb_rxd]
-    ldap        r11, XUH_NextInWord                                            
+    ldap        r11, XUH_NextInWord
     setd        res[r9], r11
 
 XUH_SetupRxAPortEvent:
@@ -60,7 +61,7 @@ XUH_SetupRxAPortEvent:
 XUH_SetupFrameTimer:
     getr        r10, XS1_RES_TYPE_TIMER
     ecallf      r10
-    
+
     ldap        r11, XUH_DoFrame
     setv        res[r10], r11
 
@@ -69,12 +70,12 @@ XUH_SetupFrameTimer:
     ldw         r9, cp[XUH_FrameTime]
     add         r11, r11, r9
     setd        res[r10], r11
-   
+
     setc        res[r10], XS1_SETC_COND_AFTER
 
     stw         r10, sp[XUH_IOLOOP_STACKFRAME_FRAMETIMER]
 
-    eeu         res[r10]      
+    eeu         res[r10]
 
 XUH_SetupForLoop:
     mov         r5, r0              // r5: epChans
@@ -84,7 +85,7 @@ XUH_SetupForLoop:
     mov         r2, r10             // r2: timer
 
     waiteu
-    
+
 XUH_DoFrame:
     //ldw         r11, dp[p_usb_txd]
     ldw         r8, dp[sofCounter]
@@ -105,8 +106,8 @@ XUH_GenerateSof:
     shl         r6, r6, 8
 
     ldc         r7, USB_PIDn_SOF        // Or in PID
-    or          r7, r7, r6  
-    or          r7, r7, r3              // On in frame number            
+    or          r7, r7, r6
+    or          r7, r7, r3              // On in frame number
 
     outpw       res[r1], r7, 24        // Output SOF
     syncr       res[r1]
@@ -117,34 +118,34 @@ XUH_GenerateSof:
                                         // Check what each ep wants to do..
 XUH_SetupNextFrameTime:
     in          r11, res[r2]           // Setup timer event for next frame
-    ldw         r9, cp[XUH_FrameTime]                     
+    ldw         r9, cp[XUH_FrameTime]
     add         r11, r11, r9
     setd        res[r2], r11
 
 XUH_CheckEPs:
     // Go through ep table and see if any want service
     // TODO can we think of a better scheme than this?
-    ldw        r4, r5[0]                       
-    bt         r4, EpReady_out 
-    ldw        r4, r5[1]                       
-    bt         r4, EpReady_out                   
-    ldw        r4, r5[2]                       
-    bt         r4, EpReady_out                   
+    ldw        r4, r5[0]
+    bt         r4, EpReady_out
+    ldw        r4, r5[1]
+    bt         r4, EpReady_out
+    ldw        r4, r5[2]
+    bt         r4, EpReady_out
     ldc        r7, 16
-    ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In   
+    ldw        r4, r5[r7]
+    bt         r4, EpReady_In
 
     ldc        r7, 17
-    ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In  
+    ldw        r4, r5[r7]
+    bt         r4, EpReady_In
 
     ldc        r7, 18
-    ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In  
+    ldw        r4, r5[r7]
+    bt         r4, EpReady_In
 
      ldc        r7, 19
-    ldw        r4, r5[r7]                       
-    bt         r4, EpReady_In               
+    ldw        r4, r5[r7]
+    bt         r4, EpReady_In
 
 XUH_WaitForNextFrame:
     waiteu
@@ -152,21 +153,21 @@ XUH_WaitForNextFrame:
 
 .align 64
 .skip 34
-EpReady_out:                        
-    // EP is ready, 
+EpReady_out:
+    // EP is ready,
     ldc     r9, 0xa001              // CRC poly
     ldc     r7, 0xf335              // TX CRC init
-    
+
 EpReady_LoadToken:
-    ldw     r11, r4[3]  
+    ldw     r11, r4[3]
 
 EpReady_OutputToken:
     outpw   res[r1], r11, 24
     syncr   res[r1]
- 
+
 EpReady_LoadPid:
-    ldw     r11, r4[4]  
-    
+    ldw     r11, r4[4]
+
     ldw     r8, r4[5]               // Load buffer
     ldw     r6, r4[7]               // Load tail length (bytes)
 
@@ -174,7 +175,7 @@ EpReady_LoadPid:
     bf      r3, XUH_SmallOutTransfer
 
     bru     r6
-  
+
 .align 64
 .skip 0
 #define TXD r1
@@ -293,7 +294,7 @@ XUD_IN_TxCrc_Tail3:
     outpw        res[TXD], r7, 16
 
 DoneTail:
-     
+
     inpw    r11, res[r0], 8         // TODO: Timeout
                                     // TODO: Check for valid ACK (could be STALL or NAK or NYET)
 
@@ -302,9 +303,12 @@ DoneTail:
     eq      r9, r9, r11
     bt      r9, XUH_OutNak
 
+    ///ldc     r9, USB_PIDn_NYET
+    //eq      r9, r9, r11
+    //bt      r9, XUH_OutNak
 
     //ldc     r11, 0                // TODO CURRENTLY clearing EP0?
-    //stw     r9, r5[0]               // Clear ready 
+    //stw     r9, r5[0]               // Clear ready
     ldw     r11, r4[0]              // note, potentially wasted 1 inst here?
     stw     r9, r11[0]
     ldw     r11, r4[1]              // load chanend
@@ -320,7 +324,7 @@ XUH_OutNak:
 XUH_SmallOutTransfer:
 SmallTxPacket:
     ldw          r8, r8[r3]                        // Load first data word
-    
+
     .xtabranch TxTail0s, TxTail1s, TxTail2s, TxTail3s
     bru         r6                              // branch taillength
 
@@ -338,9 +342,6 @@ XUD_IN_TxPid_TailS0:
 
 XUD_IN_TxCrc_TailS0:
     outpw      res[TXD], r8, 16                 // r5: 0
-    nop
-    nop
-    nop
     bu         DoneTail
 
 .align 64
@@ -418,14 +419,14 @@ EpReady_In:
 EpReady_In_OutputToken:
     outpw   res[r1], r11, 24
     syncr   res[r1]
-   
+
     inpw    r9, res[r0], 8        // TODO: Timeout
-   
+
     shr     r9, r9, 24
     ldc     r8, USB_PIDn_NAK     // TODO rather than checking for not NACK, check for PID expected?
     eq     r9, r9, r8
     bf      r9, GotData
-     
+
     waiteu
 ////////////////////////
 
@@ -439,12 +440,12 @@ GotData:
 
 XUH_NextInWord:                     // Rx loop
     in      r10, res[r0]
-    stw     r10, r6[r9] 
+    stw     r10, r6[r9]
     add     r9, r9, 1
-                                    // TODO: CRC 
+                                    // TODO: CRC
     bu      XUH_NextInWord
 
-XUH_RxALow:                         // Framing signal low 
+XUH_RxALow:                         // Framing signal low
     clre                            // TODO deal with tail!
     in      r11, res[r11]
     endin   r8, res[r0]
@@ -453,31 +454,34 @@ XUH_RxALow:                         // Framing signal low
     bru     r8
 
 .align 16
-OutTail0:   
+OutTail0:
     nop
 
 .align 16
 OutTail1:
     shr     r8, r8, 24
-    stw     r11, r6[r9] 
+    stw     r11, r6[r9]
 
 .align 16
 OutTail2:
     shr     r8, r8, 16
-    stw     r11, r6[r9] 
+    stw     r11, r6[r9]
 
 .align 16
 OutTail3:
     shr     r8, r8, 8
-    stw     r11, r6[r9] 
+    stw     r11, r6[r9]
 
     ldc     r11, USB_PIDn_ACK        // TODO check CRC
+    nop
+    nop
+    nop
     outpw   res[r1], r11, 8          // Output ACK:
- 
+
     ldc     r10, 0                  // TODO in from RXA to get this 0?
     ldc     r11, 16                 // TODO, hardcoded ep0
     stw     r10, r5[r11]            // Clear ready   res[r11]
-   
+
     ldw     r11, r4[1]              // Load EP chanend
     out     res[r11], r9            // Output length (words)
     out     res[r11], r8            // Outout tail length (bits)

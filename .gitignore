@@ -1,5 +1,14 @@
 ./build/*
+**/.build/*
 *~
 *.*~
 *.swp
 *.swo
+*.d
+*.*.d
+*.o
+*.rsp
+*.xe
+*.i
+*.a
+
