@@ -53,7 +53,7 @@
           <Service Proto="xs1_su_adc_service(chanend c_adc)">
             <Chanend Identifier="c_adc" end="2" remote="5"/>
           </Service>
-        </Node> 
+        </Node>
       </Nodes>
       <Links>
         <Link Encoding="5wire">

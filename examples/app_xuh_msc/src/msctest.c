@@ -3,13 +3,16 @@
 #include <print.h>
 #include "gpioDefines.h"
 
-#include "usb.h"
+#include "usb_std_requests.h"
 #include "usb_defs.h"
 #include "xuh.h"
 #include "stdio.h"
 
 #include "ff.h"
 
+#include "timing.h"
+
+unsigned int get_time(void);
 #include "diskio.h"
 
 #include "msc_support.h"
@@ -97,7 +100,7 @@ int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
     //if(dir)
     //{
     // Status
-        //XUH_InTransfer(ep_in, buffer);
+        XUH_InTransfer(ep_in, buffer);
 
     //}
     status = buffer[12];
@@ -117,6 +120,8 @@ int ms_readcapacity(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, int *lbaddr, 
     cb[5] = (lba >> 0) & 0xFF;
 
     retval = ms_transport(ep_out, ep_in, 8, 1, lun, 10, cb, data, residue, status);
+
+
 
     *lbaddr = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
     *lblen = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
@@ -210,21 +215,22 @@ int XUH_MSDSCSIMediaInitialise()
     USB_SetupPacket_t sp;
     int status;
 
-    delay (100000);
-    status = ms_testunitready(g_ep_out2, g_ep_in1, 0);
-    delay (100000);
-    status = ms_testunitready(g_ep_out2, g_ep_in1, 0);
+    delay(10000);
 
-    delay (100000);
-    ms_requestsense(g_ep_out2, g_ep_in1, 0, 0, &responsecode);
-    delay (100000);
+    //printstr("INIT");
+    status = ms_testunitready(g_ep_out2, g_ep_in1, 0);
+    delay(10000);
     ms_inquiry(g_ep_out2, g_ep_in1, 0, &devicetype, & dataformat, &removable);
 
-    delay (100000);
+    ms_requestsense(g_ep_out2, g_ep_in1, 0, 0, &responsecode);
+    delay(40000);
+
     ms_readcapacity(g_ep_out2, g_ep_in1, 0, 0, &lbaddr,&lnlen);
 
     g_capacity = lbaddr;
     g_blocksize = lnlen;
+
+    return 0;
 }
 
 int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
@@ -232,6 +238,7 @@ int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
     /* Issues READ 10 command block */
 
     ms_read(g_ep_out2, g_ep_in1, 0, sector, buff);
+    return 0;
 }
 
 
@@ -241,11 +248,11 @@ DSTATUS disk_initialize (
         BYTE ifNum                                /* Physical drive nmuber (0..) */
 )
 {
-    if(!XUH_MSDSCSIMediaInitialise())
+    if(XUH_MSDSCSIMediaInitialise())
     {
-        return STA_NODISK;
+        return STA_NOINIT;
     }
-    return RES_OK;
+    return 0;
 }
 
 
@@ -269,7 +276,7 @@ DRESULT disk_read (
     }
     for(nSector = 0; nSector < count; nSector++)
     {
-        if (!XUH_MSDSCSISectorRead(sector, buff))
+        if (XUH_MSDSCSISectorRead(sector, buff))
         {
             return RES_NOTRDY;
         }
@@ -286,6 +293,7 @@ DRESULT disk_write(BYTE IfNum, BYTE *buff ,DWORD sector, UINT count)
 }
 DWORD get_fattime(void)
 {
+    printstr("time");
 
   return ((DWORD)(2010 - 1980) << 25)  /* Fixed to Jan. 1, 2010 */
           | ((DWORD)1 << 21)
@@ -310,6 +318,7 @@ DRESULT disk_ioctl (BYTE IfNum, BYTE ctrl, void* Buff)
         case GET_SECTOR_SIZE:
 
             *(DWORD*)Buff = 512;
+            printint(512);
             return RES_OK;
 
         default:
@@ -325,23 +334,33 @@ void die(FRESULT rc ) /* Stop with dying message */
   printf("\nFailed with rc=%u.\n", rc);
   for(;;);
 }
+void mountdie(FRESULT rc ) /* Stop with dying message */
+{
+  printf("\nmountFailed with rc=%u.\n", rc);
+  for(;;);
+}
+void opendie(FRESULT rc ) /* Stop with dying message */
+{
+  printf("\nopenFailed with rc=%u.\n", rc);
+  for(;;);
+}
 
 FATFS Fatfs;
 FIL   Fil;
 //BYTE  fatfsbuffer[1024];
-BYTE Buff[512*50];      /* File read buffer (40 SD card blocks to let multiblock operations (if file not fragmented) */
+BYTE Buff[512*60];      /* File read buffer (40 SD card blocks to let multiblock operations (if file not fragmented) */
 
 int XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, unsigned char buffer[]);
 
 void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
 {
-
-    printstr("MSC\n")
     FRESULT rc;
     DIR dir;
     FILINFO fno;
     unsigned char buffer[64];
   UINT bw, br, i;
+    FRESULT rest;
+    int x;
 
     g_ep_out2 = ep_out2;
     g_ep_in1 = ep_in1;
@@ -365,55 +384,39 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
 
     XUH_ControlTransfer_In(ep_out0, ep_in0, sp, buffer);
 
-    f_mount(&Fatfs, "", 0);             /* Register volume work area (never fails) for SD host interface #0 */
+    rc = f_mount(&Fatfs, "", 0);             /* Register volume work area (never fails) for SD host interface #0 */
+    if(rc)
+        mountdie(rc);
+
     {
-    FATFS *fs;
-    DWORD fre_clust, fre_sect, tot_sect;
+        FATFS *fs;
+        DWORD fre_clust, fre_sect, tot_sect;
 
-    /* Get volume information and free clusters of drive 0 */
-    //rc = f_getfree("0:", &fre_clust, &fs);
-    //if(rc) die(rc);
+        /* Get volume information and free clusters of drive 0 */
+        rc = f_getfree("0:", &fre_clust, &fs);
+        if(rc) die(rc);
 
-    /* Get total sectors and free sectors */
-    //tot_sect = (fs->n_fatent - 2) * fs->csize;
-    //fre_sect = fre_clust * fs->csize;
- /* Print free space in unit of KB (assuming 512 bytes/sector) */
-   // printf("%lu KB total drive space.\n"
-     //      "%lu KB available.\n",
-      //     fre_sect / 2, tot_sect / 2);
-// printf("\nOpen root directory.\n");
-  //rc = f_opendir(&dir, "");
-  //if(rc) die(rc);
+        /* Get total sectors and free sectors */
+        tot_sect = (fs->n_fatent - 2) * fs->csize;
+        fre_sect = fre_clust * fs->csize;
 
-#if 0
-  //printf("\nDirectory listing...\n");
-  for(;;)
-  {
-    rc = f_readdir(&dir, &fno);    /* Read a directory item */
-
-if(rc || !fno.fname[0]) break; /* Error or end of dir */
-    if(fno.fattrib & AM_DIR)
-      printf("   <dir>  %s\n", fno.fname);
-    else
-    {
-      printf("%8d  %s\n", fno.fsize, fno.fname);
+        /* Print free space in unit of KB (assuming 512 bytes/sector) */
+        //printf("%lu KB total drive space.\n"
+        //        "%lu KB available.\n",
+        //        fre_sect / 2, tot_sect / 2);
     }
-  }
-  if(rc) die(rc);
 
-
-#endif
-  }
-  //printf("\nOpening an existing file: Data.bin...");
-  rc = f_open(&Fil, "TEST.TXT", FA_READ);
+rc = f_open(&Fil, "TEST.TXT", FA_READ);
   if(rc) die(rc);
   //printf("done.\n");
 
+
+
   //printf("\nReading file content...");
- // T = get_time();
+// unsigned T = get_time();
   rc = f_read(&Fil, Buff, sizeof(Buff), &br);
  // T = get_time() - T;
-  //if(rc) die(rc);
+  if(rc) die(rc);
   printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
 
   printf("\nClosing the file...");

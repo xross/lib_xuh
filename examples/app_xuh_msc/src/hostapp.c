@@ -1,12 +1,13 @@
 
 #include <xccompat.h>
+#include <stdio.h>
 
-#include "usb.h"
 #include "usb_defs.h"
 #include "xuh.h"
-#include <stdio.h>
 #include "usbh_descriptors.h"
-#include "./usbh.h"
+#include "usb_std_descriptors.h" // DescCOmp return only TODO RM me
+
+#include "usbh.h"
 #include "usbh_class_msc.h"
 
 #ifdef DEBUG
@@ -14,6 +15,8 @@
 #endif
 
 #include <print.h>
+
+
 
 #define USB_DUMMY_DESCS_HID 1
 
@@ -24,7 +27,7 @@
 
 static USBH_Driver_t const usbh_class_drivers[USB_CLASS_MAPPED_INDEX_END] =
 {
-#if (USBH_CLASS_MSC)
+#if (USB_CLASS_MSC)
     [USB_CLASS_MSC] = {
         .init                       = USBH_MSC_Init,
         .DescComp_InterfaceEndpoint   = USBH_MSC_DescComp_NextInterfaceEp,
@@ -48,7 +51,7 @@ void UnUnicode(unsigned char out[], unsigned char in[], int length)
     }
 }
 
-static inline void USB_GetNextDescriptor(uint16_t* const BytesRem, void** CurrConfigLoc)
+static inline void USB_GetNextDescriptor(unsigned short* const BytesRem, void** CurrConfigLoc)
 {
     unsigned short CurrDescriptorSize = (*((USB_Descriptor_Header_t*)(*CurrConfigLoc))).bLength;
 
@@ -140,6 +143,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     /* Get product string */
     tmp = deviceDesc.iProduct;
     length = XUH_GetDescriptor(ep_out, ep_in, (unsigned char*) &productStringDesc,  USB_WVALUE_GETDESC_STRING | tmp, 64, 0);
+    length = XUH_GetDescriptor(ep_out, ep_in, (unsigned char*) &productStringDesc,  USB_WVALUE_GETDESC_STRING | 3, 64, 0);
 
 #if 0
     printstr("Found device: ");
@@ -151,7 +155,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
 #endif
 
     /* Get Config Descriptor header */
-    uint8_t configHeader[sizeof(USB_Descriptor_Configuration_Header_t)];
+    unsigned short configHeader[sizeof(USB_Descriptor_Configuration_Header_t)];
 
 #ifndef DEBUG
     length = XUH_GetDescriptor(ep_out, ep_in, configHeader,  USB_WVALUE_GETDESC_CONFIG, sizeof(USB_Descriptor_Configuration_Header_t), 0);
@@ -160,7 +164,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
 
     unsigned *configSizePtr = ((USB_Descriptor_Configuration_Header_t*)configHeader)->wTotalLength;
 
-#if (USB_DUMMY_DESCS_HID == 1)
+#if defined(DEBUG) && (USB_DUMMY_DESCS_HID == 1)
     for(int i = 0; i < sizeof(dummyConfigDesc_MSC); i++)
         buffer[i] = dummyConfigDesc_MSC[i];
 
@@ -216,12 +220,12 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
             {
 		        USB_Descriptor_Endpoint_t* EndpointDesc = (USB_Descriptor_Endpoint_t*)buffPtr;
                 /* Found an EP! Retrieve the endpoint address from the endpoint descriptor */
-                printstr("Found ep at addr: ");
-                printhexln(EndpointDesc->bEndpointAddress);
+                //printstr("Found ep at addr: ");
+                //printhexln(EndpointDesc->bEndpointAddress);
 
                 if(result == USB_DESCSEARCH_ACCEPT)
                 {
-                    printstr("Accepting Device\n");
+                    //printstr("Accepting Device\n");
                     devAccepted = 1;
                 }
             }
@@ -229,14 +233,21 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
 
         if(devAccepted)
         {
-            printstrln("Enumerating dev. Doing a SetConfig()");
+            //printstrln("Enumerating dev. Doing a SetConfig()!");
         }
         else
         {
-            printstr("Couldn't enumerate device\n");
+            /* Couldn't enum device. */
+            /* TODO need to wait for a new device */
+            while(1);
         }
     }
-#ifndef DEBUG
+
+    //TODO Assign addreses to the EP resources
+
+
+#if 1
+//#ifndef DEBUG
     /* Set Config() */
     bmRequestType.Recipient = USB_BM_REQTYPE_RECIP_DEV;
     bmRequestType.Type = USB_BM_REQTYPE_TYPE_STANDARD;
@@ -248,14 +259,16 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     sp.wIndex = 0;
     sp.wLength = 0;
 
-    ComposeSetupBuffer(sp, spBuffer);
+    USB_ComposeSetupBuffer(sp, spBuffer);
 
     XUH_SetupTransfer(ep_out, spBuffer);
 
     length = XUH_InTransfer(ep_in, buffer);
 
-    delay(50000000);
+    delay(5000000);
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
+
+    //TODO call the right func based on device!!
     MassStorage(ep_out, ep_in, ep_out2, ep_in1);
 #endif
 

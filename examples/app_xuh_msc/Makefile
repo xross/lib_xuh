@@ -2,31 +2,17 @@
 # compiled for. It either refers to an XN file in the source directories
 # or a valid argument for the --target option when compiling.
 
-TARGET = xk_usb_audio_u8_2c.xn
+TARGET = ./src/xk_usb_audio_u8_2c.xn
 APP_NAME =
 
-SOURCE_DIRS = src
 
 # The flags passed to xcc when building the application
-BUILD_FLAGS     = -DFLASH_MAX_UPGRADE_SIZE=64*1024 -fcomment-asm -Xmapper --map -Xmapper MAPFILE -Wall -O3 -report -lflash -fsubword-select -save-temps -g -DTEST_MODE_SUPPORT -DXUD_SERIES_SUPPORT=1
-#-DDEBUG=1
-#-fschedule
+XCC_FLAGS     = -DFLASH_MAX_UPGRADE_SIZE=64*1024 -fcomment-asm -Xmapper --map -Xmapper MAPFILE -Wall -O3 -report -lflash -fsubword-select -save-temps -g -DTEST_MODE_SUPPORT -DXUD_SERIES_SUPPORT=1 -fxscope
 
 # The USED_MODULES variable lists other module used by the application. These
 # modules will extend the SOURCE_DIRS, INCLUDE_DIRS and LIB_DIRS variables.
 # Modules are expected to be in the directory above the BASE_DIR directory.
-
-BUILD_LIB ?= 0
-
-ifeq ($(BUILD_LIB), 1)
-USED_MODULES = module_xuh module_fatfs module_usbh module_usb_shared xlib_xuh
-else
-USED_MODULES = xmod_fatfs module_usbh module_usb_shared xlib_xuh
-endif
-
-MODULE_LIBRARIES = xuh_u
-
-XCC_FLAGS = $(BUILD_FLAGS)
+USED_MODULES = lib_xuh module_fatfs
 
 #=============================================================================
 # The following part of the Makefile includes the common build infrastructure
