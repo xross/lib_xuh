@@ -1,3 +1,4 @@
+#if 0
 /** XUD_CRC5_Table.S
   * @brief     Full USB CRC5 table
   */
@@ -2058,3 +2059,4 @@ crc5Table:
 .byte 0x8
 .size crc5Table, .-crc5Table
 .cc_bottom crc5Table.func
+#endif

@@ -287,10 +287,12 @@ DRESULT disk_read (
  }
 
 
+//DRESULT disk_write (BYTE pdrv, const BYTE* buff, LBA_t sector, UINT count)
 DRESULT disk_write(BYTE IfNum, BYTE *buff ,DWORD sector, UINT count)
 {
     printstr("write");
 }
+
 DWORD get_fattime(void)
 {
     printstr("time");

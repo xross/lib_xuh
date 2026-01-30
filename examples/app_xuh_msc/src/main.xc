@@ -1,13 +1,18 @@
 
 #include <xs1.h>
+#include <platform.h>
+#include <stdio.h>
 #include <print.h>
-#include "gpioDefines.h"
 
+#include "gpioDefines.h"
 #include "xuh.h"
-#include "stdio.h"
 #include "usbh.h"
 
-out port p_gpio = XS1_PORT_32A;
+/*
+ * [0]: bit 0 of usb swtich select signal
+ * [1]: bit 1 of usb swtich select signal
+ * [2]: Enable vbus output */
+on tile[0] : out port p_gpio = XS1_PORT_4F;
 
 /* TODO Move me. */
 void delay(unsigned x)
@@ -22,21 +27,33 @@ extern void MassStorage(XUH_Ep ep0_out, XUH_Ep ep0_in, XUH_Ep ep_out2, XUH_Ep ep
 
 #define NUM_EPS 3
 
-int main()
+void main()
 {
     chan xuhChans_out[NUM_EPS];
     chan xuhChans_in[NUM_EPS];
 
     /* Enable 5V, VBUS and select USB A socket in USB switch */
-    p_gpio <: (0 << PORT_32A_VBUS_OUT_EN_N_BITSHIFT) | (1 << PORT_32A_EN_5VA_BITSHIFT) 
-    | (1 << PORT_32A_USB_SEL_1_BITSHIFT);
+    //p_gpio <: (0 << PORT_32A_VBUS_OUT_EN_N_BITSHIFT) | (1 << PORT_32A_EN_5VA_BITSHIFT)
+    //| (1 << PORT_32A_USB_SEL_1_BITSHIFT);
 
     par
     {
+        on tile[0]:
+        {
+            p_gpio <: 6;
+            while(1);
+        }
+
 #ifndef DEBUG
-        XUH_Manager(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS);
+        on tile[1]:
+        {
+            XUH_Manager(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS);
+        }
 #endif
 
-        USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2], xuhChans_in[1]);
+        on tile[1]:
+        {
+            USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2], xuhChans_in[1]);
+        }
     }
 }
