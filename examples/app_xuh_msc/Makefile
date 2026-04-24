@@ -2,7 +2,8 @@
 # compiled for. It either refers to an XN file in the source directories
 # or a valid argument for the --target option when compiling.
 
-TARGET = ./src/xk_usb_audio_u8_2c.xn
+#TARGET = ./src/xk_usb_audio_u8_2c.xn
+TARGET = ./src/xk-audio-216-mc.xn
 APP_NAME =
 
 

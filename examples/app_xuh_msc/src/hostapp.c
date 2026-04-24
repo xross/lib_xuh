@@ -17,6 +17,30 @@
 #include <print.h>
 
 
+#if 1
+//FIXME remove me
+/* Table 9-5. Descriptor Types */
+#define USB_DEVICE                      0x01
+#define USB_CONFIGURATION               0x02
+#define USB_STRING                      0x03
+#define USB_INTERFACE                   0x04
+#define USB_ENDPOINT                    0x05
+#define USB_DEVICE_QUALIFIER            0x06
+#define USB_OTHER_SPEED_CONFIGURATION   0x07
+#define USB_INTERFACE_POWER             0x08
+#endif
+
+// TODO move to shared location */
+/* wValue for Get Descriptor (indicates required descriptor)
+ * Note: top byte used only
+ */
+#define USB_WVALUE_GETDESC_DEV          (USB_DEVICE << 8)
+#define USB_WVALUE_GETDESC_CONFIG       (USB_CONFIGURATION << 8)
+#define USB_WVALUE_GETDESC_STRING       (USB_STRING << 8)
+#define USB_WVALUE_GETDESC_INTER        (USB_INTERFACE << 8)
+#define USB_WVALUE_GETDESC_DEVQUAL      (USB_DEVICE_QUALIFIER << 8)
+#define USB_WVALUE_GETDESC_OSPEED_CFG   (USB_OTHER_SPEED_CONFIGURATION << 8)
+
 
 #define USB_DUMMY_DESCS_HID 1
 
@@ -129,7 +153,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     XUH_Ep ep_in = XUH_InitEp(c_in);
     XUH_Ep ep_in1 = XUH_InitEp(c_in1);
 
-    delay(100000000);
+    delay(30000000);
 
     /* Get first 8 bbytes of device desciptor */
     length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 8,  0);
@@ -265,7 +289,6 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
 
     length = XUH_InTransfer(ep_in, buffer);
 
-    delay(5000000);
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
 
     //TODO call the right func based on device!!
