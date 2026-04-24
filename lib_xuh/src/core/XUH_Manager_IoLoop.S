@@ -6,7 +6,13 @@
 #define USB_PIDn_NAK                    0x5a
 #define USB_PIDn_NYET                   0x1e
 
+#define HS 1
+
+#if HS
 #define XUH_FRAME_TIME                      12500
+#else
+#define XUH_FRAME_TIME                      100000
+#endif
 
 .section        .cp.const4,"aMc",@progbits,4
 .cc_top XUH_FrameTime.data
@@ -95,9 +101,15 @@ XUH_GenerateSof:
     //eq          r4, r8, 10
     //bt          r4, SetupTest
 
+#if HS
     ldc         r7, 0x3ff8              // Note, only update frame-number every 8 microframes.
+#else
+    ldc           r7, 0xffff
+#endif
     and         r6, r7, r8              // Mask off 11 bits for frame counter
+#if HS
     shr         r6, r6, 3
+#endif
     ldaw        r3, dp[crc5Table]       // get CRC5 for framecounter
     ld8u        r3, r3[r6]
     shl         r3, r3, 16              // TODO load this shifted
@@ -121,6 +133,16 @@ XUH_SetupNextFrameTime:
     ldw         r9, cp[XUH_FrameTime]
     add         r11, r11, r9
     setd        res[r2], r11
+
+    // Timing - ensure we dont try and send a token too close to a SOF
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
 
 XUH_CheckEPs:
     // Go through ep table and see if any want service
@@ -152,7 +174,7 @@ XUH_WaitForNextFrame:
 
 
 .align 64
-.skip 34
+.skip 14
 EpReady_out:
     // EP is ready,
     ldc     r9, 0xa001              // CRC poly
@@ -173,6 +195,18 @@ EpReady_LoadPid:
 
     ldw     r3,  r4[6]               // Load buffer index (negative)
     bf      r3, XUH_SmallOutTransfer
+
+    // TOKEN to DATA packet time
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
 
     bru     r6
 
@@ -320,10 +354,22 @@ XUH_OutNak:
 
 
 .align 32
-.skip 28
+.skip 8
 XUH_SmallOutTransfer:
 SmallTxPacket:
     ldw          r8, r8[r3]                        // Load first data word
+
+    // TOKEN to DATA packet time
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
 
     .xtabranch TxTail0s, TxTail1s, TxTail2s, TxTail3s
     bru         r6                              // branch taillength

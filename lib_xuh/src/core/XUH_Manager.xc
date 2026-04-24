@@ -308,20 +308,16 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     XUD_HAL_EnableUsb(XUD_PWR_BUS);
 
 #endif
-  // printstrln("ok");
-    t :> time;
-    //printstr("wait for USB Clock..(");
-    //printint(time);
-    //printstr(")\n");
     /* Wait for USB clock (typically 1ms after reset) */
     p_usb_clk when pinseq(1) :> int _;
     p_usb_clk when pinseq(0) :> int _;
     p_usb_clk when pinseq(1) :> int _;
     p_usb_clk when pinseq(0) :> int _;
     t :> time;
-    printstr("USB clock ok\n");
-    //printint(time);
-    //printstr(")\n");
+    //printstr("USB clock ok\n");
+
+    t :> time;
+    t when timerafter(time+10000) :> void; // 40 uS
 
     // Turn on pulldowns TODO and VBUS?
     settings[0] = XS1_SU_UIFM_OTG_CONTROL_DPPULLDOWN_SET(0, 1);
@@ -335,26 +331,18 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 1);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
 
-    // Ensure line state decoding is disabled FIXME this is just for debug
-    // RSO: Enabled linestate decoding to detect chirp
-    //settings[0] = XS1_SU_UIFM_IFM_CONTROL_DECODELINESTATE_SET(0, 1);
-    //write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_CONTROL_NUM, 1, settings);
-
     // Write flag masks to UIFM
-    settings[0] = /*{*/ XS1_SU_UIFM_FLAGS_MASK_MASK0_SET(0, /*UIFM_IFM_FLAGS_LS0_DP*/0x10) /*}*/;
-    settings[0] = XS1_SU_UIFM_FLAGS_MASK_MASK1_SET(settings[0], /*UIFM_IFM_FLAGS_LS1_DM*/0x8);
-    write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_MASK_NUM, 1, settings);
+    write_periph_word(USB_TILE_REF, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_MASK_NUM,
+            ((1<<XS1_SU_UIFM_IFM_FLAGS_K_SHIFT)
+             | ((1<<XS1_SU_UIFM_IFM_FLAGS_J_SHIFT)<<8)
+             | ((1<<XS1_SU_UIFM_IFM_FLAGS_SE0_SHIFT)<<16)));
 
-    //write_periph_word(USB_TILE_REF, XS1_GLX_PER_UIFM_CHANEND_NUM, XS1_GLX_PER_UIFM_MASK_NUM,
-    //    ((1<<XS1_UIFM_IFM_FLAGS_SE0_SHIFT)<<16)
-    //    | ((1<<XS1_UIFM_IFM_FLAGS_K_SHIFT)<<8)
-    //    | (1 << XS1_UIFM_IFM_FLAGS_J_SHIFT));
 
     printstr("XUH waiting for device...\n");
 
-  // Check DP/DM states for a device
-  while (retVal < 0)
-  {
+    // Check DP/DM states for a device
+    while (retVal < 0)
+    {
       switch (state)
       {
         case STATE_IDLE:
@@ -419,6 +407,9 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     else
         printstr("FULL speed dev detected!\n");
 
+    t :> time;
+    t when timerafter(time+5000) :> void; // 40 uS
+
     // Drive SE0 on the bus (D+ and D- connected to ground via 45ohm resistors)
     // Set opmode to 0b10 for connrect chirp transmit and receive
     // OpMode: 0b10, TermSelect and XcvrSelect 0
@@ -430,32 +421,27 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     /* Wait for chirp K from device to signal high-speed */
     flag1_port when pinseq(1) :> void;
 
-    //printstr("k");
-
     /* Wait for end of K chirp from device.. */
     flag1_port when pinseq(0) :> void;
 
-    //printstr("K");
+    t :> time;
+    t when timerafter(time+5000) :> void; // 40 uS
+
+    clearbuf(p_usb_txd);
 
     /* Chirp back to device */
 #define HOST_CHIRP_LENGTH 700
     for(int i = 0; i< 30; i++)
     {
         for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
-         p_usb_txd <: 0xffffffff;
+            p_usb_txd <: 0x0;
 
         for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
-         p_usb_txd <: 0x0;
+            p_usb_txd <: 0xffffffff;
     }
 
-     //printstr("HS!!\n");
-
-
-    /* go back to normal termination */
-    //settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x0); // OPMODE_0
-    //settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 1);
-    //settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 1);
-    //write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+    t :> time;
+    t when timerafter(time+5000) :> void; // 40 uS
 
     /* Go into HS operation */
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x0); // OPMODE_0
