@@ -6,7 +6,7 @@ USB Host (XUH) Library for xcore
 Description
 ***********
 
-This USB Host (XUH) library provides a low-level interface to USB.
+This USB Host (XUH) library provides a low-level interface to USB for XMOS XS2 based devices.
 
 **********
 Disclaimer
@@ -28,8 +28,7 @@ Todo
 ****
 
 * Port to later version of fatfs
-* Port to xs2/xs3 and modern tools
-* Port to xcommon-cmake build-system
+* Port to xs3
 * Add assignable EP addresses (i.e. XUH has a bunch of EP resource and the higher-level can assign an address
 * Doesn't deal with NYET (in reply to OUT transfer)
 * Only performs on tranfer per micro-frame
