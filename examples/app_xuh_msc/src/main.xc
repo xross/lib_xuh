@@ -8,6 +8,18 @@
 #include "xuh.h"
 #include "usbh.h"
 
+#if APP_XUH_MSC_ENABLE_LCD
+#include <spi.h>
+#include "lcd_st7789v.h"
+
+on tile[0]: out buffered port:32 p_lcd_sclk = XS1_PORT_1L;
+on tile[0]: out buffered port:32 p_lcd_mosi = XS1_PORT_1M;
+on tile[0]: out port p_lcd_cs = XS1_PORT_1N;
+on tile[0]: out port p_lcd_dc = XS1_PORT_1O;
+on tile[0]: out port p_lcd_rst = XS1_PORT_1P;
+on tile[0]: clock lcd_spi_clock = XS1_CLKBLK_1;
+#endif
+
 #if APP_XUH_MSC_HAS_USB_SWITCH_GPIO
 /*
  * [0]: bit 0 of usb swtich select signal
@@ -25,14 +37,18 @@ void delay(unsigned x)
     t when timerafter(time + x) :> void;
 }
 
-extern void MassStorage(XUH_Ep ep0_out, XUH_Ep ep0_in, XUH_Ep ep_out2, XUH_Ep ep_in1);
-
 #define NUM_EPS 3
 
 void main()
 {
     chan xuhChans_out[NUM_EPS];
     chan xuhChans_in[NUM_EPS];
+#if APP_XUH_MSC_ENABLE_LCD
+    interface spi_master_if lcd_spi[1];
+#endif
+#if APP_XUH_MSC_ENABLE_LCD
+    chan c_lcd_image;
+#endif
 
     /* Enable 5V, VBUS and select USB A socket in USB switch */
     //p_gpio <: (0 << PORT_32A_VBUS_OUT_EN_N_BITSHIFT) | (1 << PORT_32A_EN_5VA_BITSHIFT)
@@ -40,6 +56,12 @@ void main()
 
     par
     {
+#if APP_XUH_MSC_ENABLE_LCD
+        on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
+                               null, p_lcd_cs, 1, lcd_spi_clock);
+        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_image);
+#endif
+
 #if APP_XUH_MSC_HAS_USB_SWITCH_GPIO
         on tile[0]:
         {
@@ -57,7 +79,12 @@ void main()
 
         on tile[1]:
         {
-            USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2], xuhChans_in[1]);
+            USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2],
+                    xuhChans_in[1]
+#if APP_XUH_MSC_ENABLE_LCD
+                    , c_lcd_image
+#endif
+                    );
         }
     }
 }

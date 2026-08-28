@@ -62,7 +62,11 @@ static USBH_Driver_t const usbh_class_drivers[USB_CLASS_MAPPED_INDEX_END] =
 
 };
 
-void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1);
+void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
+#if APP_XUH_MSC_ENABLE_LCD
+                 , chanend c_lcd_image
+#endif
+                 );
 
 void delay(unsigned x);
 
@@ -135,7 +139,11 @@ USB_DescSearchResult_t USB_GetNextDescriptorComp(unsigned * const BytesRem,
     return USB_DESCSEARCH_FAIL;
 }
 
-void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
+void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
+#if APP_XUH_MSC_ENABLE_LCD
+             , chanend c_lcd_image
+#endif
+             )
 {
     USB_BmRequestType_t bmRequestType;
     USB_SetupPacket_t sp;
@@ -292,7 +300,11 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1)
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
 
     //TODO call the right func based on device!!
-    MassStorage(ep_out, ep_in, ep_out2, ep_in1);
+    MassStorage(ep_out, ep_in, ep_out2, ep_in1
+#if APP_XUH_MSC_ENABLE_LCD
+                , c_lcd_image
+#endif
+                );
 #endif
 
     while(1);
