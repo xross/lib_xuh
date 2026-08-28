@@ -37,6 +37,57 @@ target by default and can also be built for the original XS2 target by setting
 XS2 board enables USB switch GPIO control in the app; the XU316 target assumes
 VBUS is hardwired.
 
+ST7789V display
+===============
+
+The XU316 mass storage example displays the decoded JPEG on an ST7789V 240 by
+320 LCD. RGB888 image data is streamed from tile 1 to the tile 0 LCD task and
+converted into a tile 0 RGB565 framebuffer. Images smaller than the display are
+centred with black borders. Larger images are centre-cropped to 240 by 320. The
+complete framebuffer is assembled before the SPI transaction starts, and chip
+select remains asserted from the address-window commands through all pixel data
+for each update.
+
+Set ``APP_XUH_MSC_ENABLE_LCD=OFF`` when configuring with CMake to disable the
+display. Set ``APP_XUH_MSC_LCD_TEST_MODE=ON`` to replace JPEG rendering with a
+32 by 32 moving-box test. Each animation step updates only the 33 by 32 region
+covering the old and new box positions.
+
+The LCD is connected to tile 0 using the following ports and device pins:
+
+.. list-table:: ST7789V connections
+   :header-rows: 1
+   :widths: 15 15 20 15
+
+   * - LCD signal
+     - Tile
+     - xcore port
+     - Device pin
+   * - SCLK
+     - 0
+     - ``XS1_PORT_1L``
+     - ``X0D35``
+   * - MOSI
+     - 0
+     - ``XS1_PORT_1M``
+     - ``X0D36``
+   * - CS
+     - 0
+     - ``XS1_PORT_1N``
+     - ``X0D37``
+   * - DC
+     - 0
+     - ``XS1_PORT_1O``
+     - ``X0D38``
+   * - RST
+     - 0
+     - ``XS1_PORT_1P``
+     - ``X0D39``
+
+MISO is not used. The display uses SPI mode 0 at 30 MHz. Connect the LCD and
+XU316 grounds together and consult the XK-EVK-XU316-AIV carrier schematic for
+the physical connector positions of the listed device pins.
+
 TODO
 =====
 
@@ -67,7 +118,7 @@ Known issues
 Development repo
 ****************
 
-* `lib_xuh <https://www.github.com/xmos-innovation/lib_xuh>`_ (https://www.github.com/xmos-innovation/lib_xuh)
+* `lib_xuh <https://www.github.com/xross/lib_xuh>`_ (https://www.github.com/xross/lib_xuh)
 
 **************
 Required tools

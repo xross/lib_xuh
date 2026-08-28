@@ -1,6 +1,7 @@
 
 #include <xs1.h>
 #include <print.h>
+#include <xcore/chanend.h>
 #include "gpioDefines.h"
 
 #include "usb_std_requests.h"
@@ -38,6 +39,9 @@ XUH_Ep g_ep_out0;
 #define JPEG_OUTPUT_HEIGHT    (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
 #endif
 
+#define LCD_WIDTH             240
+#define LCD_HEIGHT            320
+
 void USBH_MSC_Init()
 {
 
@@ -53,7 +57,7 @@ s_ms_cbw ms_cbw = {
     0x0,0x0,0x0,0x0,
     0x0,0x0,0x0,0x0,
 };
-
+//
 unsigned g_tag = 0x1;
 
 int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
@@ -408,11 +412,40 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
     printf("%u bytes read.\n", *bytes_read);
     return 0;
 }
+
+#if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
+static void send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
+                               unsigned width, unsigned height,
+                               unsigned channels)
+{
+    unsigned crop_width = width < LCD_WIDTH ? width : LCD_WIDTH;
+    unsigned crop_height = height < LCD_HEIGHT ? height : LCD_HEIGHT;
+    unsigned crop_x = (width - crop_width) / 2;
+    unsigned crop_y = (height - crop_height) / 2;
+
+    chanend_out_word(c_lcd_image, crop_width);
+    chanend_out_word(c_lcd_image, crop_height);
+
+    for (unsigned y = 0; y < crop_height; ++y) {
+        const BYTE *row = rgb + ((crop_y + y) * width + crop_x) * channels;
+
+        for (unsigned x = 0; x < crop_width; ++x) {
+            chanend_out_byte(c_lcd_image, row[x * channels]);
+            chanend_out_byte(c_lcd_image, row[x * channels + 1]);
+            chanend_out_byte(c_lcd_image, row[x * channels + 2]);
+        }
+    }
+}
+#endif
 #endif
 
 
 
-void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
+void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
+#if APP_XUH_MSC_ENABLE_LCD
+                 , chanend c_lcd_image
+#endif
+                 )
 {
     FRESULT rc;
     DIR dir;
@@ -467,29 +500,6 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
     }
 
 #if APP_XUH_MSC_ENABLE_JPEG
-    //rc = f_open(&Fil, "TEST0.JPG", FA_READ);
-
-    //if(rc)
-      //  die(rc);
-    //printf("done.\n");
-
-
-
-    //printf("\nReading file content...");
-    // unsigned T = get_time();
-    //rc = f_read(&Fil, (char *) Buff, sizeof(Buff), &br);
-    // T = get_time() - T;
-    //if(rc) die(rc);
-    //printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
-
-    //printf("\nClosing the file...");
-    //rc = f_close(&Fil);
-    //if(rc) die(rc);
-    //printf("done.\n");
-
-    //for (int i = 0; i < br; i++)
-     //   printchar(Buff[i]);
-
     rc = f_open(&Fil, "TEST0.JPG", FA_READ);
     if (rc)
     {
@@ -541,12 +551,12 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
         return;
     }
 
-    if (!bmp_write_rgb888(BMP_OUTPUT_FILE, RgbBuff, info.output_width, info.output_height)) {
-        printf("Failed to write %s\n", BMP_OUTPUT_FILE);
-        return;
-    }
+#if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
+    send_rgb888_to_lcd(c_lcd_image, RgbBuff, info.output_width,
+                       info.output_height, info.channels);
+    printf("Displayed JPEG\n");
+#endif
 
-    printf("Wrote %s\n", BMP_OUTPUT_FILE);
 #else
     rc = f_open(&Fil, "TEST.TXT", FA_READ);
     if(rc) die(rc);
