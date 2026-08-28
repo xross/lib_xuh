@@ -8,6 +8,8 @@
 #include "xuh.h"
 #include "stdio.h"
 
+#include "jpeg.h"
+
 #include "ff.h"
 
 #include "timing.h"
@@ -22,12 +24,20 @@ XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
 XUH_Ep g_ep_out0;
 
+#define JPEG_INPUT_FILE       "TEST0.JPG"
+#define BMP_OUTPUT_FILE       "decoded.bmp"
+#define JPEG_INPUT_MAX_BYTES  (40 * 1024)
+#define JPEG_INPUT_WIDTH      400
+#define JPEG_INPUT_HEIGHT     400
+#define JPEG_DECODE_SCALE     1
+#define JPEG_OUTPUT_WIDTH     (JPEG_INPUT_WIDTH >> JPEG_DECODE_SCALE)
+#define JPEG_OUTPUT_HEIGHT    (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
+
 void USBH_MSC_Init()
 {
 
     // DO nothing
 }
-
 
 void delay(unsigned x);
 void ComposeSetupBuffer(USB_SetupPacket_t *sp, unsigned char buffer[8]);
@@ -178,20 +188,17 @@ int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, unsigned char buff[])
 {
 
     char cb[9] = {0x28, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0};
-  int residue, status;
-  int retval;
+    int residue, status;
+    int retval;
 
-  cb[2] = (lba >> 24) & 0xFF;
-  cb[3] = (lba >> 16) & 0xFF;
-  cb[4] = (lba >> 8) & 0xFF;
-  cb[5] = (lba >> 0) & 0xFF;
+    cb[2] = (lba >> 24) & 0xFF;
+    cb[3] = (lba >> 16) & 0xFF;
+    cb[4] = (lba >> 8) & 0xFF;
+    cb[5] = (lba >> 0) & 0xFF;
 
-  retval = ms_transport(ep_out, ep_in, 512, 1, lun, 9, cb, buff, residue, status);
+    retval = ms_transport(ep_out, ep_in, 512, 1, lun, 9, cb, buff, residue, status);
 
-
-
-  return status;
-
+    return status;
 }
 
 unsigned g_capacity;
@@ -236,7 +243,6 @@ int XUH_MSDSCSIMediaInitialise()
 int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
 {
     /* Issues READ 10 command block */
-
     ms_read(g_ep_out2, g_ep_in1, 0, sector, buff);
     return 0;
 }
@@ -351,8 +357,51 @@ FATFS Fatfs;
 FIL   Fil;
 //BYTE  fatfsbuffer[1024];
 BYTE Buff[512*60];      /* File read buffer (40 SD card blocks to let multiblock operations (if file not fragmented) */
+static BYTE RgbBuff[JPEG_DECODE_OUTPUT_SIZE(JPEG_OUTPUT_WIDTH, JPEG_OUTPUT_HEIGHT)];
+static BYTE DecodeWork[JPEG_DECODE_WORK_SIZE] WORD_ALIGNED;
 
 int XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, unsigned char buffer[]);
+
+static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* bytes_read)
+{
+    FRESULT rc;
+
+    *bytes_read = 0;
+
+    printf("\nOpening %s...", path);
+
+    rc = f_open(&Fil, path, FA_READ);
+    if (rc)
+    {
+        printf("failed rc=%u\n", rc);
+        return 1;
+    }
+
+    rc = f_read(&Fil, dst, dst_size, bytes_read);
+
+    printintln(dst_size);
+    if (rc) {
+        printf("read failed rc=%u\n", rc);
+        f_close(&Fil);
+        return 1;
+    }
+
+    rc = f_close(&Fil);
+    if (rc) {
+        printf("close failed rc=%u\n", rc);
+        return 1;
+    }
+
+    if (*bytes_read == 0 || *bytes_read == dst_size) {
+        printf("invalid size %u bytes\n", *bytes_read);
+        return 1;
+    }
+
+    printf("%u bytes read.\n", *bytes_read);
+    return 0;
+}
+
+
 
 void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
 {
@@ -408,27 +457,85 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
         //        fre_sect / 2, tot_sect / 2);
     }
 
-rc = f_open(&Fil, "TEST.TXT", FA_READ);
-  if(rc) die(rc);
-  //printf("done.\n");
+    //rc = f_open(&Fil, "TEST0.JPG", FA_READ);
+
+    //if(rc)
+      //  die(rc);
+    //printf("done.\n");
 
 
 
-  //printf("\nReading file content...");
-// unsigned T = get_time();
-  rc = f_read(&Fil, Buff, sizeof(Buff), &br);
- // T = get_time() - T;
-  if(rc) die(rc);
-  printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
+    //printf("\nReading file content...");
+    // unsigned T = get_time();
+    //rc = f_read(&Fil, (char *) Buff, sizeof(Buff), &br);
+    // T = get_time() - T;
+    //if(rc) die(rc);
+    //printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
 
-  printf("\nClosing the file...");
-  rc = f_close(&Fil);
-  if(rc) die(rc);
-  printf("done.\n");
+    //printf("\nClosing the file...");
+    //rc = f_close(&Fil);
+    //if(rc) die(rc);
+    //printf("done.\n");
 
-    for (int i = 0; i < br; i++)
-    printchar(Buff[i]);
+    //for (int i = 0; i < br; i++)
+     //   printchar(Buff[i]);
 
+    rc = f_open(&Fil, "TEST0.JPG", FA_READ);
+    if (rc)
+    {
+        printf("failed rc=%u\n", rc);
+    }
 
+    rc = f_read(&Fil, Buff, sizeof(Buff), &br);
+
+    if (rc) {
+        printf("read failed rc=%u\n", rc);
+        f_close(&Fil);
+    }
+
+    rc = f_close(&Fil);
+    if (rc) {
+        printf("close failed rc=%u\n", rc);
+        return;
+    }
+
+    if (br == 0 || br == sizeof(Buff)) {
+        printf("invalid size %u bytes\n", br);
+        return;
+    }
+
+    printf("%u bytes read.\n", br);
+
+   jpeg_decode_info_t info;
+
+    memset(RgbBuff, 0, sizeof(RgbBuff));
+    memset(DecodeWork, 0, sizeof(DecodeWork));
+
+    printf("Decoding JPEG...\n");
+    jpeg_decode_result_t result = jpeg_decode(
+        Buff,
+        br,
+        RgbBuff,
+        sizeof(RgbBuff),
+        DecodeWork,
+        sizeof(DecodeWork),
+        JPEG_DECODE_SCALE,
+        &info);
+
+    printf("Decode result = %d\n", result);
+    printf("Image = %u x %u\n", info.width, info.height);
+    printf("Output = %u x %u x %u\n", info.output_width, info.output_height, info.channels);
+    printf("Output bytes = %lu\n", (unsigned long)info.output_size);
+
+    if (result != JPEG_DECODE_OK) {
+        return;
+    }
+
+    if (!bmp_write_rgb888(BMP_OUTPUT_FILE, RgbBuff, info.output_width, info.output_height)) {
+        printf("Failed to write %s\n", BMP_OUTPUT_FILE);
+        return;
+    }
+
+    printf("Wrote %s\n", BMP_OUTPUT_FILE);
 
 }

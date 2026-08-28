@@ -9,6 +9,7 @@ set(APP_INCLUDES src)
 set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../deps.cmake)
+list(APPEND APP_DEPENDENT_MODULES "lib_jpeg")
 
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
