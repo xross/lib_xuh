@@ -8,7 +8,10 @@
 #include "xuh.h"
 #include "stdio.h"
 
+#if APP_XUH_MSC_ENABLE_JPEG
+#include "bmp_writer.h"
 #include "jpeg.h"
+#endif
 
 #include "ff.h"
 
@@ -24,6 +27,7 @@ XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
 XUH_Ep g_ep_out0;
 
+#if APP_XUH_MSC_ENABLE_JPEG
 #define JPEG_INPUT_FILE       "TEST0.JPG"
 #define BMP_OUTPUT_FILE       "decoded.bmp"
 #define JPEG_INPUT_MAX_BYTES  (40 * 1024)
@@ -32,6 +36,7 @@ XUH_Ep g_ep_out0;
 #define JPEG_DECODE_SCALE     1
 #define JPEG_OUTPUT_WIDTH     (JPEG_INPUT_WIDTH >> JPEG_DECODE_SCALE)
 #define JPEG_OUTPUT_HEIGHT    (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
+#endif
 
 void USBH_MSC_Init()
 {
@@ -357,11 +362,14 @@ FATFS Fatfs;
 FIL   Fil;
 //BYTE  fatfsbuffer[1024];
 BYTE Buff[512*60];      /* File read buffer (40 SD card blocks to let multiblock operations (if file not fragmented) */
+#if APP_XUH_MSC_ENABLE_JPEG
 static BYTE RgbBuff[JPEG_DECODE_OUTPUT_SIZE(JPEG_OUTPUT_WIDTH, JPEG_OUTPUT_HEIGHT)];
 static BYTE DecodeWork[JPEG_DECODE_WORK_SIZE] WORD_ALIGNED;
+#endif
 
 int XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, unsigned char buffer[]);
 
+#if APP_XUH_MSC_ENABLE_JPEG
 static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* bytes_read)
 {
     FRESULT rc;
@@ -400,6 +408,7 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
     printf("%u bytes read.\n", *bytes_read);
     return 0;
 }
+#endif
 
 
 
@@ -457,6 +466,7 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
         //        fre_sect / 2, tot_sect / 2);
     }
 
+#if APP_XUH_MSC_ENABLE_JPEG
     //rc = f_open(&Fil, "TEST0.JPG", FA_READ);
 
     //if(rc)
@@ -537,5 +547,19 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1)
     }
 
     printf("Wrote %s\n", BMP_OUTPUT_FILE);
+#else
+    rc = f_open(&Fil, "TEST.TXT", FA_READ);
+    if(rc) die(rc);
+
+    rc = f_read(&Fil, Buff, sizeof(Buff), &br);
+    if(rc) die(rc);
+    printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
+
+    rc = f_close(&Fil);
+    if(rc) die(rc);
+
+    for (int i = 0; i < br; i++)
+        printchar(Buff[i]);
+#endif
 
 }
