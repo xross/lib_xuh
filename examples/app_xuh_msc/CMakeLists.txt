@@ -2,14 +2,34 @@ cmake_minimum_required(VERSION 3.21)
 include($ENV{XMOS_CMAKE_PATH}/xcommon.cmake)
 project(app_xuh_msc)
 
-set(APP_HW_TARGET xk-audio-216-mc.xn)
+set(APP_HW_TARGET src/XK-EVK-XU316-AIV.xn CACHE STRING "XN target for app_xuh_msc")
 
 set(APP_INCLUDES src)
 
 set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../deps.cmake)
-list(APPEND APP_DEPENDENT_MODULES "lib_jpeg")
+
+if(APP_HW_TARGET MATCHES "xk-audio-216")
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_HAS_USB_SWITCH_GPIO=1)
+else()
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_HAS_USB_SWITCH_GPIO=0)
+endif()
+
+if(APP_HW_TARGET MATCHES "XK-EVK-XU316")
+    set(APP_XUH_MSC_ENABLE_JPEG_DEFAULT ON)
+else()
+    set(APP_XUH_MSC_ENABLE_JPEG_DEFAULT OFF)
+endif()
+
+set(APP_XUH_MSC_ENABLE_JPEG ${APP_XUH_MSC_ENABLE_JPEG_DEFAULT} CACHE BOOL "Enable JPEG decode in app_xuh_msc")
+
+if(APP_XUH_MSC_ENABLE_JPEG)
+    list(APPEND APP_DEPENDENT_MODULES "lib_jpeg")
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_ENABLE_JPEG=1)
+else()
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_ENABLE_JPEG=0)
+endif()
 
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 

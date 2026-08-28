@@ -73,8 +73,10 @@ void GenerateTokens()
 
 void XUH_IoLoop(XUX_chan epChans[]);
 
+#ifdef __XS2A__
 // from lib_xud/src/core/XUD_USBTile_Support.xc
 int write_periph_word(tileref tile, unsigned peripheral, unsigned addr, unsigned data);
+#endif
 
 
 # if 0
@@ -117,7 +119,11 @@ clock rx_usb_clk = XS1_CLKBLK_4;
 extern in buffered port:32  p_usb_clk;
 extern in  port flag0_port;
 extern in  port flag1_port;
+#ifdef __XS2A__
 extern in  port flag2_port;
+#else
+#define flag2_port null
+#endif
 extern out buffered port:32 p_usb_txd;
 extern out port tx_readyout;
 extern in port tx_readyin;
@@ -138,11 +144,43 @@ extern clock rx_usb_clk;
 #define CONNECT_DEBOUNCE (100000 * 100)
 
 void XUD_HAL_EnableUsb(unsigned pwrConfig);
+void XUD_HAL_Mode_Signalling(void);
+void XUD_HAL_Mode_DataTransfer(void);
+
+#ifndef __XS2A__
+unsigned XtlSelFromMhz(unsigned m);
+
+static unsigned xuh_xs3_usb_phy_cfg(unsigned xcvr_select, unsigned term_select,
+                                    unsigned opmode, unsigned dp_pulldown,
+                                    unsigned dm_pulldown)
+{
+    unsigned d = 0;
+    d = XS1_USB_PHY_CFG0_UTMI_XCVRSELECT_SET(d, xcvr_select);
+    d = XS1_USB_PHY_CFG0_UTMI_TERMSELECT_SET(d, term_select);
+    d = XS1_USB_PHY_CFG0_UTMI_OPMODE_SET(d, opmode);
+    d = XS1_USB_PHY_CFG0_DPPULLDOWN_SET(d, dp_pulldown);
+    d = XS1_USB_PHY_CFG0_DMPULLDOWN_SET(d, dm_pulldown);
+    d = XS1_USB_PHY_CFG0_UTMI_SUSPENDM_SET(d, 1);
+    d = XS1_USB_PHY_CFG0_TXBITSTUFF_EN_SET(d, 1);
+    d = XS1_USB_PHY_CFG0_PLL_EN_SET(d, 1);
+    d = XS1_USB_PHY_CFG0_LPM_ALIVE_SET(d, 0);
+    d = XS1_USB_PHY_CFG0_IDPAD_EN_SET(d, 0);
+    d = XS1_USB_PHY_CFG0_XTLSEL_SET(d, XtlSelFromMhz(XUD_OSC_MHZ));
+    return d;
+}
+
+static void xuh_xs3_write_usb_phy_cfg(unsigned d)
+{
+    write_sswitch_reg(get_local_tile_id(), XS1_SSWITCH_USB_PHY_CFG0_NUM, d);
+}
+#endif
 
 
+#ifdef __XS2A__
 extern tileref usb_tile;
 #define xs1_su usb_tile
 #define USB_TILE_REF usb_tile
+#endif
 void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
                  chanend c_ep_in[], unsigned epChanCount_in)
 {
@@ -151,7 +189,9 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
   int state = STATE_IDLE;
     int nextState;
     unsigned time;
+#if defined(__XS2A__) || defined(ARCH_S)
     unsigned int settings[1];
+#endif
     int retVal = -1;
 
     GenerateTokens();
@@ -220,7 +260,9 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     set_port_use_on(p_usb_rxd);
     set_port_use_on(flag0_port);
     set_port_use_on(flag1_port);
-    set_port_use_on(flag2_port); // Only on XS2A
+#ifdef __XS2A__
+    set_port_use_on(flag2_port);
+#endif
 #ifndef ARCH_S
     //set_port_use_on(reg_read_port);
     //set_port_use_on(reg_write_port);
@@ -233,11 +275,29 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     #define TX_FALL_DELAY 1
     #define RX_ACTIVE_PAD_DELAY 2
 #else
-    #error
-    #define TX_RISE_DELAY 5
-    #define TX_FALL_DELAY 2
-    #define RX_RISE_DELAY 5
-    #define RX_FALL_DELAY 5
+    #if (XUD_CORE_CLOCK >= 800)
+        #define RX_RISE_DELAY 6
+        #define TX_RISE_DELAY 3
+        #define TX_FALL_DELAY 6
+    #elif (XUD_CORE_CLOCK >= 700)
+        #define RX_RISE_DELAY 5
+        #define TX_RISE_DELAY 3
+        #define TX_FALL_DELAY 5
+    #elif (XUD_CORE_CLOCK >= 600)
+        #define RX_RISE_DELAY 5
+        #define TX_RISE_DELAY 3
+        #define TX_FALL_DELAY 4
+    #elif (XUD_CORE_CLOCK >= 500)
+        #define RX_RISE_DELAY 4
+        #define TX_RISE_DELAY 2
+        #define TX_FALL_DELAY 2
+    #elif (XUD_CORE_CLOCK >= 400)
+        #define RX_RISE_DELAY 3
+        #define TX_RISE_DELAY 2
+        #define TX_FALL_DELAY 2
+    #else
+        #error XUD_CORE_CLOCK must be >= 400
+    #endif
 #endif
 
     configure_clock_src(tx_usb_clk, p_usb_clk);
@@ -261,30 +321,10 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
 
     set_pad_delay(flag1_port, RX_ACTIVE_PAD_DELAY);
 #else
-#error
-    // Set up USB ports. Done in ASM as read port used in both directions initially.
-    // Main difference from xevious is IFM not enabled.
-    // GLX_UIFM_PortConfig (p_usb_clk, txd, rxd, flag0_port, flag1_port, flag2_port);
-    // Xevious needed asm as non-standard usage (to avoid clogging 1-bit ports)
-    // GLX uses 1bit ports so shouldn't be needed.
-    // Handshaken ports need USB clock
-    configure_clock_src (tx_usb_clk, p_usb_clk);
-    configure_clock_src (rx_usb_clk, p_usb_clk);
-
-    //this along with the following delays forces the clock
-    //to the ports to be effectively controlled by the
-    //previous usb clock edges
-    set_port_inv(p_usb_clk);
-    set_port_sample_delay(p_usb_clk);
-
-    //this delay controls the capture of rdy
+    /* XS3 uses the non-inverted USB clock and timing values from lib_xud. */
     set_clock_rise_delay(tx_usb_clk, TX_RISE_DELAY);
-
     set_clock_fall_delay(tx_usb_clk, TX_FALL_DELAY);
-
-    //this delay th capture of the rdyIn and data.
     set_clock_rise_delay(rx_usb_clk, RX_RISE_DELAY);
-    set_clock_fall_delay(rx_usb_clk, RX_FALL_DELAY);
 #endif
   	start_clock(tx_usb_clk);
   	start_clock(rx_usb_clk);
@@ -319,6 +359,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     t :> time;
     t when timerafter(time+10000) :> void; // 40 uS
 
+#ifdef __XS2A__
     // Turn on pulldowns TODO and VBUS?
     settings[0] = XS1_SU_UIFM_OTG_CONTROL_DPPULLDOWN_SET(0, 1);
     settings[0] = XS1_SU_UIFM_OTG_CONTROL_DMPULLDOWN_SET(settings[0], 1);
@@ -330,12 +371,18 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 1);
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 1);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+#else
+    XUD_HAL_Mode_Signalling();
+    xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(1, 1, 0, 1, 1));
+#endif
 
+#ifdef __XS2A__
     // Write flag masks to UIFM
     write_periph_word(USB_TILE_REF, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_MASK_NUM,
             ((1<<XS1_SU_UIFM_IFM_FLAGS_K_SHIFT)
              | ((1<<XS1_SU_UIFM_IFM_FLAGS_J_SHIFT)<<8)
              | ((1<<XS1_SU_UIFM_IFM_FLAGS_SE0_SHIFT)<<16)));
+#endif
 
 
     printstr("XUH waiting for device...\n");
@@ -413,10 +460,14 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     // Drive SE0 on the bus (D+ and D- connected to ground via 45ohm resistors)
     // Set opmode to 0b10 for connrect chirp transmit and receive
     // OpMode: 0b10, TermSelect and XcvrSelect 0
+#ifdef __XS2A__
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x2);
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+#else
+    xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x2, 0, 0));
+#endif
 
     /* Wait for chirp K from device to signal high-speed */
     flag1_port when pinseq(1) :> void;
@@ -444,10 +495,14 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     t when timerafter(time+5000) :> void; // 40 uS
 
     /* Go into HS operation */
+#ifdef __XS2A__
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x0); // OPMODE_0
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
     settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
     write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+#else
+    xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x0, 0, 0));
+#endif
 
 #if 0
     /* do some sofs... */
@@ -469,10 +524,7 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
                 | ((1<<XS1_UIFM_IFM_FLAGS_RXACTIVE)<<8)
                 | ((1<<XS1_UIFM_IFM_FLAGS_RXERROR)<<16)));
 #else
-    write_periph_word(USB_TILE_REF, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_MASK_NUM,
-            ((1<<XS1_SU_UIFM_IFM_FLAGS_RXERROR_SHIFT)
-             | ((1<<XS1_SU_UIFM_IFM_FLAGS_RXACTIVE_SHIFT)<<8)
-             | ((1<<XS1_SU_UIFM_IFM_FLAGS_NEWTOKEN_SHIFT)<<16)));
+    XUD_HAL_Mode_DataTransfer();
 #endif
 
     XUH_IoLoop(xuh_epChans);
