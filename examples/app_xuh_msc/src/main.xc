@@ -8,11 +8,13 @@
 #include "xuh.h"
 #include "usbh.h"
 
+#if APP_XUH_MSC_HAS_USB_SWITCH_GPIO
 /*
  * [0]: bit 0 of usb swtich select signal
  * [1]: bit 1 of usb swtich select signal
  * [2]: Enable vbus output */
 on tile[0] : out port p_gpio = XS1_PORT_4F;
+#endif
 
 /* TODO Move me. */
 void delay(unsigned x)
@@ -38,11 +40,13 @@ void main()
 
     par
     {
+#if APP_XUH_MSC_HAS_USB_SWITCH_GPIO
         on tile[0]:
         {
             p_gpio <: 6;
             while(1);
         }
+#endif
 
 #ifndef DEBUG
         on tile[1]:
