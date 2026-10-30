@@ -434,8 +434,6 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
 
     *bytes_read = 0;
 
-    printf("\nOpening %s...", path);
-
     rc = f_open(&Fil, path, FA_READ);
     if (rc)
     {
@@ -445,7 +443,6 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
 
     rc = f_read(&Fil, dst, dst_size, bytes_read);
 
-    printintln(dst_size);
     if (rc) {
         printf("read failed rc=%u\n", rc);
         f_close(&Fil);
@@ -463,7 +460,6 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
         return 1;
     }
 
-    printf("%u bytes read.\n", *bytes_read);
     return 0;
 }
 
@@ -557,66 +553,62 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
     }
 
 #if APP_XUH_MSC_ENABLE_JPEG
-    rc = f_open(&Fil, "TEST0.JPG", FA_READ);
-    if (rc)
-    {
-        printf("failed rc=%u\n", rc);
-        return;
-    }
+    const char * const jpeg_paths[] = {"TEST0.JPG", "TEST1.JPG"};
+    /* The reference timer runs at 100 MHz. Unsigned subtraction handles wrap. */
+    const unsigned ticks_per_second = 100000000;
+    const unsigned benchmark_ticks = 5 * ticks_per_second;
+    unsigned frames = 0;
+    unsigned elapsed;
+    g_msc_trace = 0;
+    printf("Benchmarking full JPEG read/decode/render for 5 seconds...\n");
+    unsigned start = get_time();
+    do {
+        unsigned image = frames % (sizeof(jpeg_paths) / sizeof(jpeg_paths[0]));
+        const char *path = jpeg_paths[image];
+        if (read_jpeg_from_msc(path, Buff, sizeof(Buff), &br)) {
+            printf("Failed to read %s\n", path);
+            return;
+        }
 
-    rc = f_read(&Fil, Buff, sizeof(Buff), &br);
+        jpeg_decode_info_t info = {0};
+        memset(RgbBuff, 0, sizeof(RgbBuff));
+        memset(DecodeWork, 0, sizeof(DecodeWork));
 
-    if (rc) {
-        printf("read failed rc=%u\n", rc);
-        f_close(&Fil);
-        return;
-    }
+        jpeg_decode_result_t result = jpeg_decode(
+            Buff,
+            br,
+            RgbBuff,
+            sizeof(RgbBuff),
+            DecodeWork,
+            sizeof(DecodeWork),
+            JPEG_DECODE_SCALE,
+            &info);
 
-    rc = f_close(&Fil);
-    if (rc) {
-        printf("close failed rc=%u\n", rc);
-        return;
-    }
-
-    if (br == 0 || br == sizeof(Buff)) {
-        printf("invalid size %u bytes\n", br);
-        return;
-    }
-
-    printf("%u bytes read.\n", br);
-
-   jpeg_decode_info_t info;
-
-    memset(RgbBuff, 0, sizeof(RgbBuff));
-    memset(DecodeWork, 0, sizeof(DecodeWork));
-
-    printf("Decoding JPEG...\n");
-    jpeg_decode_result_t result = jpeg_decode(
-        Buff,
-        br,
-        RgbBuff,
-        sizeof(RgbBuff),
-        DecodeWork,
-        sizeof(DecodeWork),
-        JPEG_DECODE_SCALE,
-        &info);
-
-    printf("Decode result = %d\n", result);
-    printf("Image = %u x %u\n", info.width, info.height);
-    printf("Output = %u x %u x %u\n", info.output_width, info.output_height, info.channels);
-    printf("Output bytes = %lu\n", (unsigned long)info.output_size);
-
-    if (result != JPEG_DECODE_OK) {
-        return;
-    }
+        if (result != JPEG_DECODE_OK) {
+            printf("%s: decode failed, result=%d\n", path, result);
+            return;
+        }
 
 #if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
-    send_rgb888_to_lcd(c_lcd_image, RgbBuff, info.output_width,
-                       info.output_height, info.channels);
-    printf("Displayed JPEG\n");
+        send_rgb888_to_lcd(c_lcd_image, RgbBuff, info.output_width,
+                           info.output_height, info.channels);
 #endif
+        ++frames;
+        elapsed = get_time() - start;
+    } while (elapsed < benchmark_ticks);
 
+    unsigned elapsed_ms = elapsed / (ticks_per_second / 1000);
+    unsigned fps_hundredths = (unsigned)(((unsigned long long)frames *
+                                         ticks_per_second * 100) / elapsed);
+#if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
+    printf("Rendered %u frames in %u.%03u seconds: %u.%02u FPS\n",
+#else
+    printf("Decoded %u frames in %u.%03u seconds (no LCD rendering): %u.%02u FPS\n",
 #endif
+           frames, elapsed_ms / 1000, elapsed_ms % 1000,
+           fps_hundredths / 100, fps_hundredths % 100);
+
+#else
     /* Trace only the text file, keeping JPEG read timing unchanged. */
     g_msc_trace = 1;
     printf("Opening TEST.TXT\n");
@@ -638,5 +630,6 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
     for (UINT i = 0; i < br; i++)
         printchar(Buff[i]);
     printf("\nTEST.TXT complete\n");
+#endif
 
 }
