@@ -501,23 +501,25 @@ XUH_RxALow:                         // Framing signal low
 
 .align 16
 OutTail0:
-    nop
+    bu      OutTailDone
 
 .align 16
 OutTail1:
-    shr     r8, r8, 24
-    stw     r11, r6[r9]
+    // One trailing byte is CRC only; do not write beyond the payload buffer.
+    bu      OutTailDone
 
 .align 16
 OutTail2:
-    shr     r8, r8, 16
-    stw     r11, r6[r9]
+    // Two trailing bytes are CRC only (including every 512-byte sector).
+    bu      OutTailDone
 
 .align 16
 OutTail3:
-    shr     r8, r8, 8
-    stw     r11, r6[r9]
+    shr     r11, r11, 8
+    shl     r10, r9, 2
+    st8     r11, r6[r10]             // One payload byte; remaining bytes are CRC
 
+OutTailDone:
     ldc     r11, USB_PIDn_ACK        // TODO check CRC
     nop
     nop

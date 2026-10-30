@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <timer.h>
+#include <xs1.h>
 
 #include "lcd_st7789v.h"
 
@@ -205,11 +206,15 @@ static void lcd_render_image(client spi_master_if spi, chanend c_image)
         }
     }
 
+    chkct(c_image, XS1_CT_END);
+
     lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
     for (unsigned y = 0; y < LCD_HEIGHT; ++y)
         spi.transfer_array(lcd_framebuffer[y], null, LCD_WIDTH * 2);
 
     spi.end_transaction(0);
+    /* Acknowledge completion and close the return route too. */
+    outct(c_image, XS1_CT_END);
 }
 #endif
 

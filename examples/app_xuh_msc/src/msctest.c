@@ -8,6 +8,7 @@
 #include "usb_defs.h"
 #include "xuh.h"
 #include "stdio.h"
+#include <string.h>
 
 #if APP_XUH_MSC_ENABLE_JPEG
 #include "bmp_writer.h"
@@ -22,6 +23,8 @@ unsigned int get_time(void);
 #include "diskio.h"
 
 #include "msc_support.h"
+
+#define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
 XUH_Ep g_ep_out2;
 XUH_Ep g_ep_in1;
@@ -59,14 +62,28 @@ s_ms_cbw ms_cbw = {
 };
 //
 unsigned g_tag = 0x1;
+static int g_msc_trace;
+
+static unsigned read_le32(const unsigned char *p)
+{
+    return (unsigned)p[0] | ((unsigned)p[1] << 8) |
+           ((unsigned)p[2] << 16) | ((unsigned)p[3] << 24);
+}
 
 int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
     unsigned length, int dir, int lun, unsigned cblen, char cb[], // Command stage
-    char data[], // Data Stage
+    unsigned char data[], // Data Stage
     int *dataResidue, int *status)
 {
-    unsigned char cbw_com[64];
-    unsigned char buffer[64];
+    unsigned char cbw_com[64] MSC_WORD_ALIGNED;
+    unsigned char buffer[512] MSC_WORD_ALIGNED = {0};
+    unsigned tag = g_tag;
+    int received = 0;
+
+    *dataResidue = 0;
+    *status = -1;
+    if (cblen == 0 || cblen > 16 || length > 512 || (!dir && length))
+        return -1;
 
     /* Signature */
     cbw_com[0] = 0x55;
@@ -109,28 +126,48 @@ int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
     }
 
 	/* Send to device */
+    if (g_msc_trace)
+        printf("MSC tag=%u cmd=0x%02x: sending CBW\n", tag, (unsigned char)cb[0]);
     XUH_OutTransfer(ep_out, cbw_com, 31);
 
-    if(dir)
+    if(dir && length)
     {
-        XUH_InTransfer(ep_in, data);
-
+        if (g_msc_trace)
+            printf("MSC tag=%u: waiting for data\n", tag);
+        received = XUH_InTransfer(ep_in, data);
+        if (g_msc_trace)
+            printf("MSC tag=%u: data bytes=%d\n", tag, received);
     }
-    //if(dir)
-    //{
-    // Status
-        XUH_InTransfer(ep_in, buffer);
 
-    //}
-    status = buffer[12];
+    if (g_msc_trace)
+        printf("MSC tag=%u: waiting for CSW\n", tag);
+    int csw_length = XUH_InTransfer(ep_in, buffer);
+    if (g_msc_trace)
+        printf("MSC tag=%u: CSW bytes=%d\n", tag, csw_length);
+    if (csw_length != 13 || read_le32(buffer) != 0x53425355 ||
+        read_le32(buffer + 4) != tag || buffer[12] > 2) {
+        printf("MSC tag=%u: invalid CSW: bytes=%d signature=0x%08x tag=%u status=%u\n",
+               tag, csw_length, read_le32(buffer), read_le32(buffer + 4), buffer[12]);
+        return -1;
+    }
+    *dataResidue = (int)read_le32(buffer + 8);
+    *status = buffer[12];
+    if (*status || *dataResidue < 0 || (unsigned)*dataResidue > length ||
+        received < 0 || (unsigned)received > length) {
+        printf("MSC tag=%u: status=%d residue=%d data=%d expected=%u\n",
+               tag, *status, *dataResidue, received, length);
+        return -1;
+    }
+    /* Allocation-length commands such as REQUEST SENSE may return short data. */
+    return received;
 }
 
 
 int ms_readcapacity(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, int *lbaddr, int *lblen)
 {
-    char cb[10] = {0x25, 0x0, 0x0, 0x0, 0x0, 0x0 ,0,0,0,0,0};
+    char cb[10] = {0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     int residue, status;
-    unsigned char data[64];
+    unsigned char data[512] MSC_WORD_ALIGNED;
     int retval;
 
     cb[2] = (lba >> 24) & 0xFF;
@@ -138,28 +175,28 @@ int ms_readcapacity(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, int *lbaddr, 
     cb[4] = (lba >> 8) & 0xFF;
     cb[5] = (lba >> 0) & 0xFF;
 
-    retval = ms_transport(ep_out, ep_in, 8, 1, lun, 10, cb, data, residue, status);
+    retval = ms_transport(ep_out, ep_in, 8, 1, lun, 10, cb, data, &residue, &status);
+    if (retval != 8) return -1;
 
-
-
-    *lbaddr = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-    *lblen = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+    *lbaddr = ((unsigned)data[0] << 24) | ((unsigned)data[1] << 16) | ((unsigned)data[2] << 8) | data[3];
+    *lblen = ((unsigned)data[4] << 24) | ((unsigned)data[5] << 16) | ((unsigned)data[6] << 8) | data[7];
 
     return status;
 }
 
 int ms_requestsense(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int desc, int *responsecode)
 {
-    char cb[6] = {0x03, 0, 0, 0, 36, 0};
-    unsigned data[5];
+    char cb[6] = {0x03, 0, 0, 0, 18, 0};
+    unsigned char data[512] MSC_WORD_ALIGNED;
     int residue, status;
     int retval;
 
     cb[1] = desc & 1;
 
-    retval = ms_transport(ep_out, ep_in, 18, 1, lun, 6, cb, (unsigned) data, residue, status);
+    retval = ms_transport(ep_out, ep_in, 18, 1, lun, 6, cb, data, &residue, &status);
+    if (retval < 1) return -1;
 
-    responsecode = (data[0] & 0x7f) * (data[0] >> 7);
+    *responsecode = data[0] & 0x7f;
 
     return status;
 
@@ -168,35 +205,36 @@ int ms_requestsense(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int desc, int *respons
 int ms_testunitready(XUH_Ep ep_out, XUH_Ep ep_in, int lun)
 {
     char cb[6] = {0,0,0,0,0,0};
-    unsigned data[5];
+    unsigned char data[512] MSC_WORD_ALIGNED;
     int residue, status;
 
     int retval;
 
-    retval = ms_transport(ep_out, ep_in, 0, 0, lun, 6, cb, data, residue, status);
-    return status;
+    retval = ms_transport(ep_out, ep_in, 0, 0, lun, 6, cb, data, &residue, &status);
+    return retval < 0 ? retval : status;
 }
 
 int ms_inquiry(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int *deviceType, int *removable, int *dataformat)
 {
   char cb[6] = {0x12, 0x0, 0x0, 0x0, 36, 0x0};
   int residue, status;
-  char data[36];
+  unsigned char data[512] MSC_WORD_ALIGNED;
   int retval;
 
-  retval = ms_transport(ep_out, ep_in, 36, 1, lun, 6, cb, data, residue, status);
+  retval = ms_transport(ep_out, ep_in, 36, 1, lun, 6, cb, data, &residue, &status);
+  if (retval < 5) return -1;
 
-  deviceType = data[0];
-  removable = (data[1] >> 7) & 1;
-  dataformat = data[3] & 0xF;
+  *deviceType = data[0] & 0x1f;
+  *removable = (data[1] >> 7) & 1;
+  *dataformat = data[3] & 0xF;
 
   return status;
 }
 
-int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, unsigned char buff[])
+int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, unsigned lba, unsigned char buff[])
 {
 
-    char cb[9] = {0x28, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0};
+    char cb[10] = {0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0};
     int residue, status;
     int retval;
 
@@ -205,9 +243,9 @@ int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int lba, unsigned char buff[])
     cb[4] = (lba >> 8) & 0xFF;
     cb[5] = (lba >> 0) & 0xFF;
 
-    retval = ms_transport(ep_out, ep_in, 512, 1, lun, 9, cb, buff, residue, status);
+    retval = ms_transport(ep_out, ep_in, 512, 1, lun, 10, cb, buff, &residue, &status);
 
-    return status;
+    return retval == 512 && residue == 0 ? status : -1;
 }
 
 unsigned g_capacity;
@@ -215,6 +253,7 @@ unsigned g_blocksize;
 
 int XUH_MSDSCSIMediaInitialise()
 {
+    g_msc_trace = 1;
     /* This function performs the followin SCSI commands:
         * READ CAPACITY 10
         * REQUEST SENSE
@@ -241,19 +280,23 @@ int XUH_MSDSCSIMediaInitialise()
     ms_requestsense(g_ep_out2, g_ep_in1, 0, 0, &responsecode);
     delay(40000);
 
-    ms_readcapacity(g_ep_out2, g_ep_in1, 0, 0, &lbaddr,&lnlen);
+    status = ms_readcapacity(g_ep_out2, g_ep_in1, 0, 0, &lbaddr,&lnlen);
+    if (status || lnlen != 512) {
+        printf("MSC: capacity read failed or unsupported sector size\n");
+        return 1;
+    }
 
     g_capacity = lbaddr;
     g_blocksize = lnlen;
 
+    g_msc_trace = 0;
     return 0;
 }
 
 int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
 {
     /* Issues READ 10 command block */
-    ms_read(g_ep_out2, g_ep_in1, 0, sector, buff);
-    return 0;
+    return ms_read(g_ep_out2, g_ep_in1, 0, sector, buff);
 }
 
 
@@ -263,6 +306,7 @@ DSTATUS disk_initialize (
         BYTE ifNum                                /* Physical drive nmuber (0..) */
 )
 {
+    if (ifNum != 0) return STA_NOINIT;
     if(XUH_MSDSCSIMediaInitialise())
     {
         return STA_NOINIT;
@@ -276,15 +320,19 @@ DSTATUS disk_initialize (
 DRESULT disk_read (
         BYTE ifNum,              /* Physical drive nmuber (0..) */
         BYTE *buff,            /* Data buffer to store read data */
-        DWORD sector,           /* Sector address (LBA) */
+        LBA_t sector,           /* Sector address (LBA) */
         UINT count              /* Number of sectors to read (1..255) */
 )
 {
-    int nSector;
+    UINT nSector;
+
+    if (g_msc_trace)
+        printf("disk_read: drive=%u sector=%lu count=%u\n",
+               ifNum, (unsigned long)sector, count);
 
    // printstr("read ifNum:");
     //printint(ifNum); printstr(" sector: "), printint(sector); printstr(" count: "); printintln(count);
-    if(ifNum != 0)
+    if(ifNum != 0 || count == 0)
     {
         printstr("ifNum out of Range");
         return RES_PARERR;
@@ -293,7 +341,7 @@ DRESULT disk_read (
     {
         if (XUH_MSDSCSISectorRead(sector, buff))
         {
-            return RES_NOTRDY;
+            return RES_ERROR;
         }
         sector++;
         buff += 512;
@@ -303,9 +351,10 @@ DRESULT disk_read (
 
 
 //DRESULT disk_write (BYTE pdrv, const BYTE* buff, LBA_t sector, UINT count)
-DRESULT disk_write(BYTE IfNum, BYTE *buff ,DWORD sector, UINT count)
+DRESULT disk_write(BYTE IfNum, const BYTE *buff, LBA_t sector, UINT count)
 {
-    printstr("write");
+    /* This example has no SCSI WRITE implementation. Never report success. */
+    return IfNum == 0 ? RES_WRPRT : RES_PARERR;
 }
 
 DWORD get_fattime(void)
@@ -322,27 +371,32 @@ DWORD get_fattime(void)
 
 DSTATUS disk_status(BYTE IfNum)
 {
-        return 0;
+        return IfNum == 0 ? 0 : STA_NOINIT;
     //printstr("status");
    // return STA_NOINIT;
 }
 
 DRESULT disk_ioctl (BYTE IfNum, BYTE ctrl, void* Buff)
 {
+    if (IfNum != 0) return RES_PARERR;
 
     switch(ctrl)
     {
+        case CTRL_SYNC:
+            return RES_OK;
+        case GET_SECTOR_COUNT:
+            *(LBA_t*)Buff = (LBA_t)g_capacity + 1;
+            return RES_OK;
+        case GET_BLOCK_SIZE:
+            *(DWORD*)Buff = 1;
+            return RES_OK;
         case GET_SECTOR_SIZE:
 
-            *(DWORD*)Buff = 512;
-            printint(512);
+            *(WORD*)Buff = 512;
             return RES_OK;
 
         default:
-            printstr("ioctl: ");
-            printintln(IfNum);
-            printintln(ctrl);
-            break;
+            return RES_PARERR;
     }
 }
 
@@ -435,6 +489,9 @@ static void send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
             chanend_out_byte(c_lcd_image, row[x * channels + 2]);
         }
     }
+    /* Release the cross-tile route, then wait for rendering to finish. */
+    chanend_out_control_token(c_lcd_image, XS1_CT_END);
+    chanend_check_control_token(c_lcd_image, XS1_CT_END);
 }
 #endif
 #endif
@@ -504,6 +561,7 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
     if (rc)
     {
         printf("failed rc=%u\n", rc);
+        return;
     }
 
     rc = f_read(&Fil, Buff, sizeof(Buff), &br);
@@ -511,6 +569,7 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
     if (rc) {
         printf("read failed rc=%u\n", rc);
         f_close(&Fil);
+        return;
     }
 
     rc = f_close(&Fil);
@@ -557,19 +616,27 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
     printf("Displayed JPEG\n");
 #endif
 
-#else
-    rc = f_open(&Fil, "TEST.TXT", FA_READ);
-    if(rc) die(rc);
-
-    rc = f_read(&Fil, Buff, sizeof(Buff), &br);
-    if(rc) die(rc);
-    printf("%d bytes read. Read rate: %dKBytes/Sec\n", br, (br*100000));
-
-    rc = f_close(&Fil);
-    if(rc) die(rc);
-
-    for (int i = 0; i < br; i++)
-        printchar(Buff[i]);
 #endif
+    /* Trace only the text file, keeping JPEG read timing unchanged. */
+    g_msc_trace = 1;
+    printf("Opening TEST.TXT\n");
+    rc = f_open(&Fil, "TEST.TXT", FA_READ);
+    printf("TEST.TXT f_open: rc=%u\n", rc);
+    if (rc) return;
+
+    printf("Reading TEST.TXT\n");
+    rc = f_read(&Fil, Buff, sizeof(Buff), &br);
+    printf("TEST.TXT f_read: rc=%u bytes=%u\n", rc, br);
+    FRESULT read_rc = rc;
+
+    printf("Closing TEST.TXT\n");
+    rc = f_close(&Fil);
+    printf("TEST.TXT f_close: rc=%u\n", rc);
+    g_msc_trace = 0;
+    if (read_rc || rc) return;
+
+    for (UINT i = 0; i < br; i++)
+        printchar(Buff[i]);
+    printf("\nTEST.TXT complete\n");
 
 }
