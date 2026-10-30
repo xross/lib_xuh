@@ -7,6 +7,7 @@
 #include "gpioDefines.h"
 #include "xuh.h"
 #include "usbh.h"
+#include "jpeg_pipeline.h"
 
 #if APP_XUH_MSC_ENABLE_LCD
 #include <spi.h>
@@ -49,6 +50,9 @@ void main()
 #if APP_XUH_MSC_ENABLE_LCD
     chan c_lcd_image;
 #endif
+#if MSC_JPEG_PIPELINE
+    chan c_jpeg_load, c_jpeg_output, c_lcd_render;
+#endif
 
     /* Enable 5V, VBUS and select USB A socket in USB switch */
     //p_gpio <: (0 << PORT_32A_VBUS_OUT_EN_N_BITSHIFT) | (1 << PORT_32A_EN_5VA_BITSHIFT)
@@ -59,7 +63,14 @@ void main()
 #if APP_XUH_MSC_ENABLE_LCD
         on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
                                null, p_lcd_cs, 1, lcd_spi_clock);
+#if MSC_JPEG_PIPELINE
+        on tile[0]: jpeg_pipeline_receive(c_lcd_image, c_lcd_render);
+        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_render);
+        on tile[1]: jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
+        on tile[1]: jpeg_pipeline_transmit(c_jpeg_output, c_lcd_image);
+#else
         on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_image);
+#endif
 #endif
 
 #if APP_XUH_MSC_HAS_USB_SWITCH_GPIO
@@ -82,7 +93,11 @@ void main()
             USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2],
                     xuhChans_in[1]
 #if APP_XUH_MSC_ENABLE_LCD
+#if MSC_JPEG_PIPELINE
+                    , c_jpeg_load
+#else
                     , c_lcd_image
+#endif
 #endif
                     );
         }

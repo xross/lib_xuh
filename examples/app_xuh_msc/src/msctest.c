@@ -2,6 +2,7 @@
 #include <xs1.h>
 #include <print.h>
 #include <xcore/chanend.h>
+#include <xcore/hwtimer.h>
 #include "gpioDefines.h"
 
 #include "usb_std_requests.h"
@@ -23,6 +24,7 @@ unsigned int get_time(void);
 #include "diskio.h"
 
 #include "msc_support.h"
+#include "jpeg_pipeline.h"
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
@@ -30,17 +32,6 @@ XUH_Ep g_ep_out2;
 XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
 XUH_Ep g_ep_out0;
-
-#if APP_XUH_MSC_ENABLE_JPEG
-#define JPEG_INPUT_FILE       "TEST0.JPG"
-#define BMP_OUTPUT_FILE       "decoded.bmp"
-#define JPEG_INPUT_MAX_BYTES  (40 * 1024)
-#define JPEG_INPUT_WIDTH      400
-#define JPEG_INPUT_HEIGHT     400
-#define JPEG_DECODE_SCALE     1
-#define JPEG_OUTPUT_WIDTH     (JPEG_INPUT_WIDTH >> JPEG_DECODE_SCALE)
-#define JPEG_OUTPUT_HEIGHT    (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
-#endif
 
 #define LCD_WIDTH             240
 #define LCD_HEIGHT            320
@@ -419,8 +410,10 @@ void opendie(FRESULT rc ) /* Stop with dying message */
 FATFS Fatfs;
 FIL   Fil;
 //BYTE  fatfsbuffer[1024];
-BYTE Buff[512*60];      /* File read buffer (40 SD card blocks to let multiblock operations (if file not fragmented) */
-#if APP_XUH_MSC_ENABLE_JPEG
+#if !MSC_JPEG_PIPELINE
+BYTE Buff[512*60];      /* File read buffer */
+#endif
+#if APP_XUH_MSC_ENABLE_JPEG && !MSC_JPEG_PIPELINE
 static BYTE RgbBuff[JPEG_DECODE_OUTPUT_SIZE(JPEG_OUTPUT_WIDTH, JPEG_OUTPUT_HEIGHT)];
 static BYTE DecodeWork[JPEG_DECODE_WORK_SIZE] WORD_ALIGNED;
 #endif
@@ -463,8 +456,8 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
     return 0;
 }
 
-#if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
-static void send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
+#if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE && !MSC_JPEG_PIPELINE
+static unsigned send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
                                unsigned width, unsigned height,
                                unsigned channels)
 {
@@ -487,11 +480,92 @@ static void send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
     }
     /* Release the cross-tile route, then wait for rendering to finish. */
     chanend_out_control_token(c_lcd_image, XS1_CT_END);
+    unsigned render_ticks = chanend_in_word(c_lcd_image);
     chanend_check_control_token(c_lcd_image, XS1_CT_END);
+    return render_ticks;
 }
 #endif
 #endif
 
+#if MSC_JPEG_PIPELINE
+static void print_pipeline_rate(const char *label, unsigned frames, unsigned ticks)
+{
+    unsigned ms = ticks / (PIPELINE_TICKS_PER_SECOND / 1000);
+    unsigned fps = ticks ? (unsigned)(((unsigned long long)frames *
+                           PIPELINE_TICKS_PER_SECOND * 100) / ticks) : 0;
+    printf("%s: %u frames in %u.%03u seconds: %u.%02u FPS\n",
+           label, frames, ms / 1000, ms % 1000, fps / 100, fps % 100);
+}
+
+static void run_jpeg_pipeline(chanend c_load)
+{
+    const char * const paths[JPEG_FILE_COUNT] = JPEG_FILE_PATHS;
+    unsigned sent = 0, pending = 0, failed = 0, load_ticks = 0;
+    unsigned ack[2];
+    g_msc_trace = 0;
+#if PIPELINE_VERIFY
+    printf("Pipeline frame-integrity verification enabled\n");
+#endif
+    printf("Benchmarking pipelined JPEG load/decode/render for 5 seconds, then draining...\n");
+    unsigned start = get_reference_time();
+    do {
+        unsigned slot = sent & 1;
+        const char *path = paths[sent % JPEG_FILE_COUNT];
+        UINT bytes;
+        unsigned load_start = get_reference_time();
+        int read_failed = read_jpeg_from_msc(path, jpeg_pipeline_input_buffer(slot),
+                                           PIPELINE_INPUT_BYTES, &bytes);
+        load_ticks += get_reference_time() - load_start;
+
+        /* While the alternate buffer was being filled, the decoder consumed
+         * the previous input. It must release ownership before publication. */
+        if (pending) {
+            pipeline_receive(c_load, ack, 2);
+            pending = 0;
+            if (ack[0] != sent - 1 || ack[1]) failed = 1;
+        }
+        if (read_failed || failed) {
+            printf("JPEG pipeline: stopped loading %s\n", path);
+            failed = 1;
+            break;
+        }
+        unsigned ready[3] = {slot, sent, bytes};
+        pipeline_send(c_load, ready, 3);
+        ++sent;
+        pending = 1;
+    } while (get_reference_time() - start < 5 * PIPELINE_TICKS_PER_SECOND);
+
+    unsigned production_end = get_reference_time();
+    if (pending) {
+        pipeline_receive(c_load, ack, 2);
+        if (ack[0] != sent - 1 || ack[1]) failed = 1;
+    }
+    unsigned stop[3] = {PIPELINE_STOP, 0, 0};
+    pipeline_send(c_load, stop, 3);
+    unsigned stats[PIPELINE_STATS_WORDS];
+    pipeline_receive(c_load, stats, PIPELINE_STATS_WORDS);
+    unsigned frames = stats[PIPELINE_FRAMES];
+    printf("Pipeline drained: loaded=%u displayed=%u sequence/ownership/integrity errors=%u\n",
+           sent, frames, stats[PIPELINE_ERRORS]);
+    if (failed || stats[PIPELINE_ERRORS] || frames != sent || !frames) {
+        printf("JPEG pipeline benchmark failed\n");
+        return;
+    }
+    print_pipeline_rate("Pipelined total (including fill/drain)", frames,
+                        stats[PIPELINE_LAST_COMPLETE] - start);
+    printf("Startup to first displayed frame: %u us; producer window: %u ms\n",
+           (stats[PIPELINE_FIRST_COMPLETE] - start) / 100,
+           (production_end - start) / 100000);
+    if (frames > 1)
+        print_pipeline_rate("Steady state", frames - 1,
+                            stats[PIPELINE_LAST_COMPLETE] - stats[PIPELINE_FIRST_COMPLETE]);
+    printf("Average stage times (us): load=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
+           load_ticks / frames / 100, stats[PIPELINE_DECODE_TICKS] / frames / 100,
+           stats[PIPELINE_TRANSFER_TICKS] / frames / 100,
+           stats[PIPELINE_CONVERT_TICKS] / frames / 100,
+           stats[PIPELINE_RENDER_TICKS] / frames / 100);
+}
+#endif
 
 
 void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
@@ -552,24 +626,30 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
         //        fre_sect / 2, tot_sect / 2);
     }
 
-#if APP_XUH_MSC_ENABLE_JPEG
-    const char * const jpeg_paths[] = {"TEST0.JPG", "TEST1.JPG"};
+#if MSC_JPEG_PIPELINE
+    run_jpeg_pipeline(c_lcd_image);
+#elif APP_XUH_MSC_ENABLE_JPEG
+    const char * const jpeg_paths[JPEG_FILE_COUNT] = JPEG_FILE_PATHS;
     /* The reference timer runs at 100 MHz. Unsigned subtraction handles wrap. */
     const unsigned ticks_per_second = 100000000;
     const unsigned benchmark_ticks = 5 * ticks_per_second;
     unsigned frames = 0;
     unsigned elapsed;
+    unsigned load_ticks = 0, decode_ticks = 0, display_ticks = 0, spi_ticks = 0;
     g_msc_trace = 0;
     printf("Benchmarking full JPEG read/decode/render for 5 seconds...\n");
     unsigned start = get_time();
     do {
         unsigned image = frames % (sizeof(jpeg_paths) / sizeof(jpeg_paths[0]));
         const char *path = jpeg_paths[image];
+        unsigned stage_start = get_time();
         if (read_jpeg_from_msc(path, Buff, sizeof(Buff), &br)) {
             printf("Failed to read %s\n", path);
             return;
         }
 
+        load_ticks += get_time() - stage_start;
+        stage_start = get_time();
         jpeg_decode_info_t info = {0};
         memset(RgbBuff, 0, sizeof(RgbBuff));
         memset(DecodeWork, 0, sizeof(DecodeWork));
@@ -589,9 +669,12 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
             return;
         }
 
+        decode_ticks += get_time() - stage_start;
 #if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE
-        send_rgb888_to_lcd(c_lcd_image, RgbBuff, info.output_width,
-                           info.output_height, info.channels);
+        stage_start = get_time();
+        spi_ticks += send_rgb888_to_lcd(c_lcd_image, RgbBuff, info.output_width,
+                                      info.output_height, info.channels);
+        display_ticks += get_time() - stage_start;
 #endif
         ++frames;
         elapsed = get_time() - start;
@@ -607,6 +690,9 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
 #endif
            frames, elapsed_ms / 1000, elapsed_ms % 1000,
            fps_hundredths / 100, fps_hundredths % 100);
+    printf("Average stage times (us): load=%u decode=%u transfer/convert=%u LCD SPI=%u\n",
+           load_ticks / frames / 100, decode_ticks / frames / 100,
+           (display_ticks - spi_ticks) / frames / 100, spi_ticks / frames / 100);
 
 #else
     /* Trace only the text file, keeping JPEG read timing unchanged. */

@@ -6,6 +6,7 @@
 #include <xs1.h>
 
 #include "lcd_st7789v.h"
+#include "jpeg_pipeline.h"
 
 #define LCD_WIDTH        240
 #define LCD_HEIGHT       320
@@ -173,7 +174,7 @@ static void lcd_move_box(client spi_master_if spi, unsigned old_x, unsigned new_
 }
 #endif
 
-#if !APP_XUH_MSC_LCD_TEST_MODE
+#if !APP_XUH_MSC_LCD_TEST_MODE && !MSC_JPEG_PIPELINE
 static uint8_t lcd_framebuffer[LCD_HEIGHT][LCD_WIDTH * 2];
 
 static uint16_t rgb888_to_rgb565(uint8_t red, uint8_t green, uint8_t blue)
@@ -208,13 +209,52 @@ static void lcd_render_image(client spi_master_if spi, chanend c_image)
 
     chkct(c_image, XS1_CT_END);
 
+    timer profile_timer;
+    unsigned start, end;
+    profile_timer :> start;
     lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
     for (unsigned y = 0; y < LCD_HEIGHT; ++y)
         spi.transfer_array(lcd_framebuffer[y], null, LCD_WIDTH * 2);
 
     spi.end_transaction(0);
+    profile_timer :> end;
     /* Acknowledge completion and close the return route too. */
+    outuint(c_image, end - start);
     outct(c_image, XS1_CT_END);
+}
+#endif
+
+#if MSC_JPEG_PIPELINE
+static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
+{
+    unsigned expected = 0;
+    timer profile_timer;
+    while (1) {
+        unsigned slot = inuint(c_render);
+        unsigned sequence = inuint(c_render);
+        chkct(c_render, XS1_CT_END);
+        if (slot == PIPELINE_STOP) return;
+        /* Slot and sequence are checked before accessing shared tile-0 RAM. */
+        if (sequence != expected || slot != (sequence & 1)) __builtin_trap();
+        ++expected;
+        unsigned start, end;
+        unsigned errors = jpeg_pipeline_check_lcd(slot);
+        profile_timer :> start;
+        unsafe {
+            unsigned char * unsafe buffer = jpeg_pipeline_lcd_buffer(slot);
+            lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
+            for (unsigned y = 0; y < LCD_HEIGHT; ++y)
+                spi.transfer_array((const uint8_t *)(buffer + y * LCD_WIDTH * 2),
+                                   null, LCD_WIDTH * 2);
+            spi.end_transaction(0);
+        }
+        profile_timer :> end;
+        errors += jpeg_pipeline_check_lcd(slot);
+        outuint(c_render, sequence);
+        outuint(c_render, end - start);
+        outuint(c_render, errors);
+        outct(c_render, XS1_CT_END);
+    }
 }
 #endif
 
@@ -247,6 +287,8 @@ void lcd_st7789v_task(client spi_master_if spi, chanend c_image)
         lcd_move_box(spi, old_x, x);
         delay_milliseconds(FRAME_DELAY_MS);
     }
+#elif MSC_JPEG_PIPELINE
+    lcd_render_pipeline(spi, c_image);
 #else
     while (1)
         lcd_render_image(spi, c_image);

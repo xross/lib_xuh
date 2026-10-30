@@ -6,7 +6,7 @@ set(APP_HW_TARGET src/XK-EVK-XU316-AIV.xn CACHE STRING "XN target for app_xuh_ms
 
 set(APP_INCLUDES src)
 
-set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue -fxscope)
+set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue -fxscope -mcmodel=large)
 set(APP_XSCOPE_SRCS config.xscope)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../deps.cmake)
