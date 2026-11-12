@@ -6,10 +6,11 @@
 #include <xcore/hwtimer.h>
 #include "jpeg.h"
 
-/* Tile 1: only the loader writes input, only the decoder writes RGB.
+/* Tile 1: double-buffered compressed input, single full-screen RGB output.
+ * Only the loader writes input, only the decoder writes RGB.
  * Slot ownership is transferred by the ready/free channel messages. */
 static unsigned char jpeg_input[2][PIPELINE_INPUT_BYTES] __attribute__((aligned(4)));
-static unsigned char jpeg_rgb[2][PIPELINE_RGB_BYTES] __attribute__((aligned(4)));
+static unsigned char jpeg_rgb[PIPELINE_RGB_BYTES] __attribute__((aligned(4)));
 static unsigned char jpeg_work[JPEG_DECODE_WORK_SIZE] __attribute__((aligned(4)));
 
 /* Tile 0: the receiver fills one slot while the LCD task renders the other. */
@@ -17,8 +18,6 @@ static unsigned char lcd_frames[2][PIPELINE_LCD_HEIGHT * PIPELINE_LCD_WIDTH * 2]
 
 #if PIPELINE_VERIFY
 static unsigned rgb_hash[2], lcd_hash[2];
-static unsigned rgb_expected[JPEG_FILE_COUNT], lcd_expected[JPEG_FILE_COUNT];
-static unsigned rgb_hash_valid[JPEG_FILE_COUNT], lcd_hash_valid[JPEG_FILE_COUNT];
 
 static unsigned frame_hash(const unsigned char *data, unsigned size)
 {
@@ -47,7 +46,7 @@ unsigned char *jpeg_pipeline_lcd_buffer(unsigned slot)
     return lcd_frames[slot];
 }
 
-void jpeg_pipeline_decode(chanend c_load, chanend c_output)
+static void decode_play(chanend c_load, chanend c_output)
 {
     unsigned expected = 0, pending = 0, decode_ticks = 0, errors = 0;
     unsigned ready[3], free_slot[1];
@@ -59,29 +58,25 @@ void jpeg_pipeline_decode(chanend c_load, chanend c_output)
             ++errors;
         ++expected;
 
-        unsigned start = get_reference_time();
-        jpeg_decode_info_t info = {0};
-        memset(jpeg_rgb[slot], 0, sizeof(jpeg_rgb[slot]));
-        memset(jpeg_work, 0, sizeof(jpeg_work));
-        jpeg_decode_result_t result = jpeg_decode(
-            jpeg_input[slot], size, jpeg_rgb[slot], sizeof(jpeg_rgb[slot]),
-            jpeg_work, sizeof(jpeg_work), JPEG_DECODE_SCALE, &info);
-        decode_ticks += get_reference_time() - start;
-
-        /* The previous RGB slot can be transmitted while this frame decodes. */
+        /* There is one full-screen RGB buffer: wait for the transmitter to
+         * release it before decoding. Compressed input remains double buffered. */
         if (pending) {
             pipeline_receive(c_output, free_slot, 1);
             if (free_slot[0] != sequence - 1) ++errors;
         }
         pending = 0;
+        unsigned start = get_reference_time();
+        jpeg_decode_info_t info = {0};
+        memset(jpeg_rgb, 0, sizeof(jpeg_rgb));
+        memset(jpeg_work, 0, sizeof(jpeg_work));
+        jpeg_decode_result_t result = jpeg_decode(
+            jpeg_input[slot], size, jpeg_rgb, sizeof(jpeg_rgb),
+            jpeg_work, sizeof(jpeg_work), JPEG_DECODE_SCALE, &info);
+        decode_ticks += (get_reference_time() - start) / 100;
         if (result == JPEG_DECODE_OK && info.channels == 3) {
 #if PIPELINE_VERIFY
-            unsigned hash = frame_hash(jpeg_rgb[slot], PIPELINE_RGB_BYTES);
-            unsigned image = sequence % JPEG_FILE_COUNT;
-            if (rgb_hash_valid[image] && hash != rgb_expected[image]) ++errors;
-            rgb_expected[image] = hash;
+            unsigned hash = frame_hash(jpeg_rgb, PIPELINE_RGB_BYTES);
             rgb_hash[slot] = hash;
-            rgb_hash_valid[image] = 1;
 #endif
             unsigned output[5] = {slot, sequence, info.output_width,
                                   info.output_height, info.channels};
@@ -109,7 +104,7 @@ void jpeg_pipeline_decode(chanend c_load, chanend c_output)
     pipeline_send(c_load, stats, PIPELINE_STATS_WORDS);
 }
 
-void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
+static void transmit_play(chanend c_decode, chanend c_image)
 {
     unsigned ready[5], ack[1], expected = 0, ticks = 0, first_complete = 0, errors = 0;
     while (1) {
@@ -124,7 +119,7 @@ void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
         unsigned crop_x = (width - crop_width) / 2;
         unsigned crop_y = (height - crop_height) / 2;
 #if PIPELINE_VERIFY
-        if (frame_hash(jpeg_rgb[slot], PIPELINE_RGB_BYTES) != rgb_hash[slot]) ++errors;
+        if (frame_hash(jpeg_rgb, PIPELINE_RGB_BYTES) != rgb_hash[slot]) ++errors;
 #endif
 
         unsigned start = get_reference_time();
@@ -132,7 +127,7 @@ void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
         chanend_out_word(c_image, crop_width);
         chanend_out_word(c_image, crop_height);
         for (unsigned y = 0; y < crop_height; ++y) {
-            const unsigned char *row = jpeg_rgb[slot] +
+            const unsigned char *row = jpeg_rgb +
                 ((crop_y + y) * width + crop_x) * channels;
             for (unsigned x = 0; x < crop_width; ++x) {
                 chanend_out_byte(c_image, row[x * channels]);
@@ -142,12 +137,12 @@ void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
         }
         chanend_out_control_token(c_image, XS1_CT_END);
 #if PIPELINE_VERIFY
-        if (frame_hash(jpeg_rgb[slot], PIPELINE_RGB_BYTES) != rgb_hash[slot]) ++errors;
+        if (frame_hash(jpeg_rgb, PIPELINE_RGB_BYTES) != rgb_hash[slot]) ++errors;
 #endif
         pipeline_receive(c_image, ack, 1);
         if (ack[0] != sequence) ++errors;
         if (sequence == 0) first_complete = get_reference_time();
-        ticks += get_reference_time() - start;
+        ticks += (get_reference_time() - start) / 100;
         /* Receiver no longer reads RGB; decoder can reclaim this slot. */
         pipeline_send(c_decode, ack, 1);
     }
@@ -162,7 +157,7 @@ void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
     pipeline_send(c_decode, stats, PIPELINE_STATS_WORDS);
 }
 
-void jpeg_pipeline_receive(chanend c_image, chanend c_render)
+static void receive_play(chanend c_image, chanend c_render)
 {
     unsigned expected = 0, pending = 0, stats[PIPELINE_STATS_WORDS] = {0};
     unsigned ack[3];
@@ -193,20 +188,16 @@ void jpeg_pipeline_receive(chanend c_image, chanend c_render)
             }
         }
         chanend_check_control_token(c_image, XS1_CT_END);
-        stats[PIPELINE_CONVERT_TICKS] += get_reference_time() - start;
+        stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;
 #if PIPELINE_VERIFY
         unsigned hash = frame_hash(lcd_frames[slot], sizeof(lcd_frames[slot]));
-        unsigned image = sequence % JPEG_FILE_COUNT;
-        if (lcd_hash_valid[image] && hash != lcd_expected[image]) ++stats[PIPELINE_ERRORS];
-        lcd_expected[image] = hash;
         lcd_hash[slot] = hash;
-        lcd_hash_valid[image] = 1;
 #endif
         if (pending) {
             pipeline_receive(c_render, ack, 3);
             if (ack[0] != sequence - 1) ++stats[PIPELINE_ERRORS];
             stats[PIPELINE_ERRORS] += ack[2];
-            stats[PIPELINE_RENDER_TICKS] += ack[1];
+            stats[PIPELINE_RENDER_TICKS] += ack[1] / 100;
             ++stats[PIPELINE_FRAMES];
         }
         unsigned ready[2] = {slot, sequence};
@@ -218,7 +209,7 @@ void jpeg_pipeline_receive(chanend c_image, chanend c_render)
             pipeline_receive(c_render, ack, 3);
             if (ack[0] != sequence) ++stats[PIPELINE_ERRORS];
             stats[PIPELINE_ERRORS] += ack[2];
-            stats[PIPELINE_RENDER_TICKS] += ack[1];
+            stats[PIPELINE_RENDER_TICKS] += ack[1] / 100;
             ++stats[PIPELINE_FRAMES];
             pending = 0;
         }
@@ -228,11 +219,27 @@ void jpeg_pipeline_receive(chanend c_image, chanend c_render)
         pipeline_receive(c_render, ack, 3);
         if (ack[0] != expected - 1) ++stats[PIPELINE_ERRORS];
         stats[PIPELINE_ERRORS] += ack[2];
-        stats[PIPELINE_RENDER_TICKS] += ack[1];
+        stats[PIPELINE_RENDER_TICKS] += ack[1] / 100;
         ++stats[PIPELINE_FRAMES];
     }
     unsigned stop[2] = {PIPELINE_STOP, 0};
     pipeline_send(c_render, stop, 2);
     pipeline_send(c_image, stats, PIPELINE_STATS_WORDS);
+}
+
+/* A stop message ends one play, not the lifetime of the pipeline tasks. */
+void jpeg_pipeline_decode(chanend c_load, chanend c_output)
+{
+    while (1) decode_play(c_load, c_output);
+}
+
+void jpeg_pipeline_transmit(chanend c_decode, chanend c_image)
+{
+    while (1) transmit_play(c_decode, c_image);
+}
+
+void jpeg_pipeline_receive(chanend c_image, chanend c_render)
+{
+    while (1) receive_play(c_image, c_render);
 }
 #endif

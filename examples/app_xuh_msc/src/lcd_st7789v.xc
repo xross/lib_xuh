@@ -8,8 +8,8 @@
 #include "lcd_st7789v.h"
 #include "jpeg_pipeline.h"
 
-#define LCD_WIDTH        240
-#define LCD_HEIGHT       320
+#define LCD_WIDTH        320
+#define LCD_HEIGHT       240
 #define LCD_SPI_KHZ      30000
 #define BOX_SIZE         32
 #define BOX_UPDATE_WIDTH (BOX_SIZE + 1)
@@ -95,7 +95,7 @@ static void lcd_init(client spi_master_if spi)
     delay_milliseconds(120);
 
     lcd_write_command_data(spi, ST7789_COLMOD, 0x55); /* 16-bit RGB565. */
-    lcd_write_command_data(spi, ST7789_MADCTL, 0x00);
+    lcd_write_command_data(spi, ST7789_MADCTL, 0x60);
     lcd_write_command(spi, ST7789_INVON);
     lcd_write_command(spi, ST7789_DISPON);
     delay_milliseconds(20);
@@ -233,7 +233,11 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
         unsigned slot = inuint(c_render);
         unsigned sequence = inuint(c_render);
         chkct(c_render, XS1_CT_END);
-        if (slot == PIPELINE_STOP) return;
+        /* End of a play: the receiver has already drained every frame. */
+        if (slot == PIPELINE_STOP) {
+            expected = 0;
+            continue;
+        }
         /* Slot and sequence are checked before accessing shared tile-0 RAM. */
         if (sequence != expected || slot != (sequence & 1)) __builtin_trap();
         ++expected;

@@ -1,89 +1,94 @@
-JPEG display pipeline
-=====================
+Motion JPEG display pipeline
+============================
 
-The JPEG/LCD configuration cycles through ``TEST0.JPG``, ``TEST1.JPG``,
-``TEST2.JPG`` and ``TEST3.JPG`` from USB storage. Each frame is reopened, read,
-closed, decoded and displayed at full scale. The default image size is
-200 x 200; file selection is independent of the two pipeline buffer slots.
-The loader is the only task that accesses FatFs and the USB endpoints.
+Place ``VIDEO.MJP`` at the root of a FAT-formatted USB memory stick. The default
+JPEG/LCD configuration loops the entire raw MJPEG file at maximum speed.
+After every play it drains pending frames, reports the play number, completed-frame
+FPS and stage timings, resets per-play counters and reopens the file.
+Workers stay alive and USB, FatFs and the LCD are initialised only once.
+File/decode errors stop playback after pending work drains.
+It does not pace playback, skip frames or play audio. Raw MJPEG
+has no presentation timestamps. AVI and other containers are not supported.
 
-Task placement
---------------
+Input and display
+-----------------
+
+Use baseline JPEG frames at 320 x 240 with a maximum compressed frame size of
+30 KiB. Smaller images are centred; larger decoded images must fit the output
+buffer or decoding fails. The decoder uses full scale. The ST7789V is configured
+for 320 x 240 landscape addressing (MADCTL 0x60); view the display rotated 90
+degrees from its portrait orientation. Verify rotation and colour order on the
+physical panel.
+
+Example conversion and preview on a Mac with FFmpeg installed::
+
+    ffmpeg -i source.mp4 -t 30 -an \
+      -vf "fps=10,scale=320:240,setsar=1" \
+      -c:v mjpeg -pix_fmt yuvj420p -q:v 5 -f mjpeg VIDEO.MJP
+    ffplay -f mjpeg -framerate 10 VIDEO.MJP
+
+This stretches the complete picture to the LCD dimensions without cropping its
+width. ``makemjpg.sh`` provides the source-specific conversion with a three-second
+intro and removal of embedded letterboxing; its input media are not included.
+
+The buffered reader opens the file once and performs sequential 4096-byte reads.
+It follows JPEG segment lengths (so embedded marker-like bytes in metadata do
+not terminate a frame), entropy byte stuffing and restart markers. It handles
+markers crossing disk-read boundaries and rejects malformed, truncated and
+oversized frames. Read/decode errors stop production and drain prior valid work.
+
+Task placement and ownership
+----------------------------
 
 * Tile 1: USB manager, file loader, JPEG decoder and pixel transmitter.
 * Tile 0: pixel receiver/RGB565 converter, LCD renderer and SPI master.
 
-The compressed input and RGB888 output each have two buffers on tile 1. Tile 0
-has two full-screen RGB565 buffers. Buffer pointers never cross tiles; pixel
-bytes do. The receiver converts the next image while SPI renders the previous
-one. The decoder can process another image while the previous RGB buffer is
-being transmitted, and the loader can fill the alternate input buffer during
-decoding.
+Compressed input has two 30 KiB slots. The decoder uses one 230400-byte RGB888
+buffer, waiting for the transmitter to release it before the next decode. This
+keeps full-screen playback within SRAM; unlike the earlier 200 x 200 benchmark,
+decode and RGB transmission do not overlap. File loading and LCD output can
+still overlap decoding. Tile 0 has two 153600-byte RGB565 framebuffers, allowing
+receive/conversion to overlap LCD rendering.
 
-Ownership protocol
-------------------
+Ready messages carry a slot, monotonically increasing sequence and frame metadata.
+Acknowledgements explicitly return ownership, and provide bounded backpressure
+without polling or dropping frames. Pointers stay on their owning tile; pixel
+bytes cross tiles. Every channel message ends with CT_END, and C ownership
+handoffs include compiler memory barriers. Stop messages propagate only after
+pending work is complete. A frame is counted after its LCD transaction finishes.
+The end-of-play marker resets each worker's sequence and metrics rather than
+terminating the worker. The next play starts only after the completed statistics
+have returned to the loader.
 
-Ready messages carry a slot index, monotonically increasing frame sequence and
-stage-specific metadata. The consumer returns a completion message before the
-producer can publish another buffer. A producer may fill the alternate slot
-while the previous slot is owned by the consumer. It cannot reuse that previous
-slot until completion has been received. This bounded handoff supplies
-backpressure without polling or dropping frames.
+The large memory model is required. On XU316 the build uses approximately
+321 KiB on tile 0 and 345 KiB on tile 1, including code, data and stacks.
 
-Every raw channel message ends with ``CT_END`` to release its route. C handoffs
-include compiler memory barriers so shared-buffer accesses cannot be reordered
-across ownership transfers. The LCD task uses an unsafe pointer only while it
-owns a tile-local framebuffer; completion is sent after the SPI transaction.
+Measurements and verification
+----------------------------
 
-Benchmark
----------
+The first 320 x 240 test clip completed 450 frames in 50.040 s (8.99 FPS), with
+loaded and displayed counts matching and zero sequence errors. Average stage
+times were load 13.2 ms, decode 95.3 ms, transmit/wait 13.1 ms, receive/convert
+13.1 ms and LCD SPI 41.9 ms. These overlapping stage times must not be summed.
+A clip encoded at 15 FPS therefore plays slower than real time with this build.
 
-The loader produces frames for approximately five seconds, then sends a stop
-message. Each stage finishes its pending work before forwarding stop. The final
-result travels back only after the last LCD transaction has completed. Loaded
-and displayed frame counts must match, and sequence/slot acknowledgements are
-checked throughout.
+Elapsed time accumulates unsigned reference-timer deltas after each frame into
+a 64-bit total, supporting clips longer than the 32-bit timer's wrap period.
+Each individual frame operation must complete within one timer period (42.9 s).
+Stage totals accumulate microseconds, rather than raw timer ticks. No routine
+per-frame logging occurs. The report is printed after EOF and pipeline drain.
 
-The report includes total FPS with fill/drain, startup-to-first-display latency,
-steady-state FPS after the first completed frame, and average stage times.
-The first image is explicitly acknowledged after rendering to measure startup;
-later image acknowledgements permit receive/render overlap. All timestamps used
-for end-to-end rates are taken on tile 1, avoiding cross-tile timer offsets.
-Transmit/wait and receive/convert timings include channel backpressure, so stage
-averages overlap and must not be added together. Normal per-frame logging is
-disabled.
+Development builds may enable PIPELINE_VERIFY=1 to hash each RGB buffer before
+and after transmission and each LCD buffer before and after rendering. Video
+frames are not compared against previous frames, since their contents change.
+Leave this disabled for performance measurements.
 
-Enable ``PIPELINE_VERIFY=1`` as a compiler define for development integrity
-checks. These compare complete decoded images and LCD framebuffers against the
-first instance of each of the four images, check RGB buffers before
-and after transmission, and check LCD buffers before and after rendering.
-This verification assumes the four source images do not change during a run and
-adds work, so leave it disabled for performance measurements.
+The native reader test checks split markers, metadata containing EOI bytes,
+stuffed entropy bytes, restart markers, every truncation point, buffer limits
+and disk errors. From the lib_xuh root, with a native sanitizer-capable compiler::
 
-The default double buffers require the large memory model. The XU316 build fits
-within each tile's 512 KiB SRAM; inspect the linker memory/stack report when
-changing image sizes. RGB buffers currently hold 200 x 200 x 3 bytes, and each
-compressed frame is limited to less than 30 KiB.
-
-Earlier measurements on the XU316 board with two 400 x 400 source images decoded at
-half scale to 200 x 200 RGB, and a full 240 x 320 LCD update at 30 MHz SPI:
-
-* Serial: 3.58 FPS.
-* Pipelined, including fill/drain: 27 completed frames in 5.437 s, 4.96 FPS.
-* Pipelined steady state: 4.99 FPS.
-* Average pipeline stage times: load 18.2 ms, decode 199.2 ms,
-  transmit/wait 9.1 ms, receive/convert 7.6 ms, LCD SPI 42.1 ms.
-
-With four resized 200 x 200 JPEGs decoded at full scale, the hardware benchmark
-completed 78 frames in 5.121 s: 15.22 FPS overall and 15.39 FPS steady state.
-Average load time was 11.8 ms and decode time was 64.9 ms. The LCD SPI transfer
-remained 42.1 ms per frame.
-
-Decode remains the limiting stage. The earlier integrity-enabled benchmark completed
-without mismatches; missing-file and decode-error cases also drained pending
-valid frames without deadlock. Integrity checks are disabled in the timing build.
-
-For future MJPEG input, the loader-to-decoder message already describes a frame
-by its compressed-buffer slot, sequence number and byte count. A sequential
-frame reader can replace the alternating-file loader without changing the
-pixel receiver or LCD renderer.
+    cc -std=c99 -g -fsanitize=address,undefined \
+      -Iexamples/app_xuh_msc/src -I../lib_fatfs/lib_fatfs/api \
+      examples/app_xuh_msc/tests/mjpeg_reader_test.c \
+      examples/app_xuh_msc/src/mjpeg_reader.c -o /tmp/mjpeg-reader-test
+    /tmp/mjpeg-reader-test

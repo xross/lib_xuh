@@ -6,19 +6,19 @@
 #define MSC_JPEG_PIPELINE (APP_XUH_MSC_ENABLE_JPEG && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
 #define PIPELINE_STOP (~0u)
 #define PIPELINE_INPUT_BYTES (512 * 60)
-#define JPEG_INPUT_WIDTH 200
-#define JPEG_INPUT_HEIGHT 200
+#define JPEG_INPUT_WIDTH 320
+#define JPEG_INPUT_HEIGHT 240
 #define JPEG_DECODE_SCALE 0
 #define JPEG_FILE_COUNT 4
 #define JPEG_FILE_PATHS {"TEST0.JPG", "TEST1.JPG", "TEST2.JPG", "TEST3.JPG"}
 #define JPEG_OUTPUT_WIDTH (JPEG_INPUT_WIDTH >> JPEG_DECODE_SCALE)
 #define JPEG_OUTPUT_HEIGHT (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
 #define PIPELINE_RGB_BYTES (JPEG_OUTPUT_WIDTH * JPEG_OUTPUT_HEIGHT * 3)
-#define PIPELINE_LCD_WIDTH 240
-#define PIPELINE_LCD_HEIGHT 320
+#define PIPELINE_LCD_WIDTH 320
+#define PIPELINE_LCD_HEIGHT 240
 #define PIPELINE_TICKS_PER_SECOND 100000000u
 
-/* Development-only integrity check for the repeating four-image benchmark.
+/* Development-only per-buffer integrity checks during transmit/render.
  * Disabled for timing runs; enable with -DPIPELINE_VERIFY=1. */
 #ifndef PIPELINE_VERIFY
 #define PIPELINE_VERIFY 0
@@ -28,6 +28,7 @@ enum {
     PIPELINE_FRAMES,
     PIPELINE_FIRST_COMPLETE,
     PIPELINE_LAST_COMPLETE,
+    /* Stage totals below are microseconds, not raw timer ticks. */
     PIPELINE_TRANSFER_TICKS,
     PIPELINE_CONVERT_TICKS,
     PIPELINE_RENDER_TICKS,

@@ -25,6 +25,7 @@ unsigned int get_time(void);
 
 #include "msc_support.h"
 #include "jpeg_pipeline.h"
+#include "mjpeg_reader.h"
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
@@ -33,8 +34,8 @@ XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
 XUH_Ep g_ep_out0;
 
-#define LCD_WIDTH             240
-#define LCD_HEIGHT            320
+#define LCD_WIDTH             PIPELINE_LCD_WIDTH
+#define LCD_HEIGHT            PIPELINE_LCD_HEIGHT
 
 void USBH_MSC_Init()
 {
@@ -421,6 +422,7 @@ static BYTE DecodeWork[JPEG_DECODE_WORK_SIZE] WORD_ALIGNED;
 int XUH_ControlTransfer_In(XUH_Ep ep_out, XUH_Ep ep_in, USB_SetupPacket_t sp, unsigned char buffer[]);
 
 #if APP_XUH_MSC_ENABLE_JPEG
+#if !MSC_JPEG_PIPELINE
 static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* bytes_read)
 {
     FRESULT rc;
@@ -455,6 +457,7 @@ static int read_jpeg_from_msc(const char* path, BYTE* dst, UINT dst_size, UINT* 
 
     return 0;
 }
+#endif
 
 #if APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE && !MSC_JPEG_PIPELINE
 static unsigned send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
@@ -488,34 +491,27 @@ static unsigned send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
 #endif
 
 #if MSC_JPEG_PIPELINE
-static void print_pipeline_rate(const char *label, unsigned frames, unsigned ticks)
+static int play_mjpeg(chanend c_load, unsigned play)
 {
-    unsigned ms = ticks / (PIPELINE_TICKS_PER_SECOND / 1000);
-    unsigned fps = ticks ? (unsigned)(((unsigned long long)frames *
-                           PIPELINE_TICKS_PER_SECOND * 100) / ticks) : 0;
-    printf("%s: %u frames in %u.%03u seconds: %u.%02u FPS\n",
-           label, frames, ms / 1000, ms % 1000, fps / 100, fps % 100);
-}
-
-static void run_jpeg_pipeline(chanend c_load)
-{
-    const char * const paths[JPEG_FILE_COUNT] = JPEG_FILE_PATHS;
-    unsigned sent = 0, pending = 0, failed = 0, load_ticks = 0;
+    static mjpeg_reader_t reader;
+    unsigned sent = 0, pending = 0, failed = 0;
+    unsigned long long load_us = 0, elapsed_ticks = 0;
     unsigned ack[2];
     g_msc_trace = 0;
-#if PIPELINE_VERIFY
-    printf("Pipeline frame-integrity verification enabled\n");
-#endif
-    printf("Benchmarking pipelined JPEG load/decode/render for 5 seconds, then draining...\n");
+    memset(&reader, 0, sizeof(reader));
+    FRESULT open_rc = f_open(&reader.file, "VIDEO.MJP", FA_READ);
+    printf("Play %u: VIDEO.MJP open: rc=%u\n", play, open_rc);
+    if (open_rc) failed = 1;
+    printf("Playing raw MJPEG at full speed, 320x240 landscape...\n");
     unsigned start = get_reference_time();
-    do {
+    unsigned previous = start;
+    while (!failed) {
         unsigned slot = sent & 1;
-        const char *path = paths[sent % JPEG_FILE_COUNT];
         UINT bytes;
         unsigned load_start = get_reference_time();
-        int read_failed = read_jpeg_from_msc(path, jpeg_pipeline_input_buffer(slot),
+        int frame_result = mjpeg_read_frame(&reader, jpeg_pipeline_input_buffer(slot),
                                            PIPELINE_INPUT_BYTES, &bytes);
-        load_ticks += get_reference_time() - load_start;
+        load_us += (get_reference_time() - load_start) / 100;
 
         /* While the alternate buffer was being filled, the decoder consumed
          * the previous input. It must release ownership before publication. */
@@ -524,18 +520,26 @@ static void run_jpeg_pipeline(chanend c_load)
             pending = 0;
             if (ack[0] != sent - 1 || ack[1]) failed = 1;
         }
-        if (read_failed || failed) {
-            printf("JPEG pipeline: stopped loading %s\n", path);
-            failed = 1;
+        if (frame_result <= 0 || failed) {
+            if (frame_result < 0) {
+                printf("VIDEO.MJP: frame %u read/format/capacity error, disk rc=%u, bytes=%u\n",
+                       sent, reader.error, bytes);
+                failed = 1;
+            }
             break;
         }
         unsigned ready[3] = {slot, sent, bytes};
         pipeline_send(c_load, ready, 3);
         ++sent;
         pending = 1;
-    } while (get_reference_time() - start < 5 * PIPELINE_TICKS_PER_SECOND);
-
-    unsigned production_end = get_reference_time();
+        unsigned now = get_reference_time();
+        elapsed_ticks += (unsigned)(now - previous);
+        previous = now;
+    }
+    if (!open_rc) {
+        FRESULT close_rc = f_close(&reader.file);
+        if (close_rc) { printf("VIDEO.MJP close: rc=%u\n", close_rc); failed = 1; }
+    }
     if (pending) {
         pipeline_receive(c_load, ack, 2);
         if (ack[0] != sent - 1 || ack[1]) failed = 1;
@@ -544,26 +548,33 @@ static void run_jpeg_pipeline(chanend c_load)
     pipeline_send(c_load, stop, 3);
     unsigned stats[PIPELINE_STATS_WORDS];
     pipeline_receive(c_load, stats, PIPELINE_STATS_WORDS);
+    elapsed_ticks += (unsigned)(get_reference_time() - previous);
     unsigned frames = stats[PIPELINE_FRAMES];
     printf("Pipeline drained: loaded=%u displayed=%u sequence/ownership/integrity errors=%u\n",
            sent, frames, stats[PIPELINE_ERRORS]);
     if (failed || stats[PIPELINE_ERRORS] || frames != sent || !frames) {
-        printf("JPEG pipeline benchmark failed\n");
-        return;
+        printf("MJPEG playback failed\n");
+        return 1;
     }
-    print_pipeline_rate("Pipelined total (including fill/drain)", frames,
-                        stats[PIPELINE_LAST_COMPLETE] - start);
-    printf("Startup to first displayed frame: %u us; producer window: %u ms\n",
-           (stats[PIPELINE_FIRST_COMPLETE] - start) / 100,
-           (production_end - start) / 100000);
-    if (frames > 1)
-        print_pipeline_rate("Steady state", frames - 1,
-                            stats[PIPELINE_LAST_COMPLETE] - stats[PIPELINE_FIRST_COMPLETE]);
+    unsigned long long elapsed_ms = elapsed_ticks / 100000;
+    unsigned fps = elapsed_ticks ? (unsigned)((unsigned long long)frames *
+                    PIPELINE_TICKS_PER_SECOND * 100 / elapsed_ticks) : 0;
+    printf("Play %u complete: %u frames in %llu.%03u seconds: %u.%02u FPS\n",
+           play, frames, elapsed_ms / 1000, (unsigned)(elapsed_ms % 1000), fps / 100, fps % 100);
+    printf("Startup to first displayed frame: %u us\n",
+           (stats[PIPELINE_FIRST_COMPLETE] - start) / 100);
     printf("Average stage times (us): load=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
-           load_ticks / frames / 100, stats[PIPELINE_DECODE_TICKS] / frames / 100,
-           stats[PIPELINE_TRANSFER_TICKS] / frames / 100,
-           stats[PIPELINE_CONVERT_TICKS] / frames / 100,
-           stats[PIPELINE_RENDER_TICKS] / frames / 100);
+           (unsigned)(load_us / frames), stats[PIPELINE_DECODE_TICKS] / frames,
+           stats[PIPELINE_TRANSFER_TICKS] / frames,
+           stats[PIPELINE_CONVERT_TICKS] / frames,
+           stats[PIPELINE_RENDER_TICKS] / frames);
+    return 0;
+}
+
+static void run_jpeg_pipeline(chanend c_load)
+{
+    for (unsigned play = 1; ; ++play)
+        if (play_mjpeg(c_load, play)) return;
 }
 #endif
 
