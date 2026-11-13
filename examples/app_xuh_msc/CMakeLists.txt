@@ -56,9 +56,8 @@ endif()
 
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
-# Per-pixel video loops: these options are appended after the application flags,
-# re-enabling dual issue for these two files only.
-set(APP_COMPILER_FLAGS_yuv_rgb565.c -mdual-issue)
+# Per-word frame transfer loops: this option is appended after the application
+# flags, re-enabling dual issue for this file only.
 set(APP_COMPILER_FLAGS_mpeg_pipeline.c -mdual-issue)
 
 set(APP_COMPILER_FLAGS_jpeg ${APP_COMPILER_FLAGS} -DAPP_XUH_MSC_ENABLE_MPEG1=0)

@@ -7,7 +7,7 @@
 #include <string.h>
 #include <xcore/hwtimer.h>
 #include "mpeg.h"
-#include "yuv_rgb565.h"
+#include "mpeg_rgb565.h"
 #include "fps_overlay.h"
 
 /* Tile 1: two filesystem input chunks (one being read ahead while the other is
@@ -223,7 +223,12 @@ static void receive_play(chanend c_image, chanend c_render)
         for (unsigned y = 0; y < height; y += 2) {
             for (unsigned index = 0; index < sizeof(strip) / sizeof(strip[0]); ++index)
                 strip[index] = chanend_in_word(c_image);
-            yuv420_strip_to_rgb565((const unsigned char *)strip, lcd_frames[slot] + y * width * 2, width);
+            /* The strip holds Y row, Y row, Cb row, Cr row without padding. */
+            const unsigned char *rows = (const unsigned char *)strip;
+            unsigned char *output = lcd_frames[slot] + y * width * 2;
+            mpeg_yuv420_rows_to_rgb565(rows, rows + width, rows + 2 * width,
+                                       rows + 2 * width + width / 2,
+                                       output, output + width * 2, width);
         }
         chanend_check_control_token(c_image, XS1_CT_END);
         stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;

@@ -223,13 +223,15 @@ Reception of the next frame and SPI rendering of the previous frame overlap. Raw
 channel transactions close with CT_END and ownership handoffs include memory
 barriers.
 
-The conversion follows PL_MPEG's limited-range BT.601 coefficients and is
-bit-exact with its scalar arithmetic. Luma scaling and each channel's clamp,
-RGB565 field placement and byte order are tabulated (about 6 KB of tables on
-tile 0, built on first use), and two pixels are written per 32-bit store. It is
-not VPU-vectorised. The application is built with ``-mno-dual-issue``;
-``yuv_rgb565.c`` and ``mpeg_pipeline.c`` re-enable dual issue through file-specific
-compiler flags because they contain the per-pixel loops.
+The conversion is ``lib_mpeg``'s ``mpeg_yuv420_rows_to_rgb565()``
+(``mpeg_rgb565.h``), called on tile 0 for each strip. It follows PL_MPEG's
+limited-range BT.601 coefficients and is bit-exact with its scalar arithmetic.
+Luma scaling and each channel's clamp, RGB565 field placement and byte order are
+tabulated (about 6 KB of tables on tile 0, built on first use), and two pixels
+are written per 32-bit store. It is not VPU-vectorised. The application is built
+with ``-mno-dual-issue``; ``lib_mpeg`` requests dual issue for its own sources,
+and ``mpeg_pipeline.c``, which holds the per-word transfer loops, re-enables it
+through a file-specific compiler flag.
 
 At EOF the decoder drains delayed reference pictures, closes and checks that
 arena allocations were released. The receiver drains the last LCD transaction
@@ -363,16 +365,10 @@ stick yourself; the application does not use the host-side ``data/`` directory.
 Colour and pipeline tests
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The native strip-conversion test compares 163840 pixels against pristine
-PL_MPEG's RGB888 conversion followed by RGB565 packing, including clamping and
-chroma extremes. From the repository root::
-
-    mkdir -p build-video
-    cc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize=shift -fwrapv \
-      -Iexamples/app_xuh_msc/src -I../lib_mpeg/third_party/pl_mpeg \
-      examples/app_xuh_msc/tests/yuv_rgb565_test.c \
-      examples/app_xuh_msc/src/yuv_rgb565.c -o build-video/yuv_rgb565_test
-    build-video/yuv_rgb565_test
+The colour conversion is tested in ``lib_mpeg`` (``tests/rgb565_test.c``, run by
+its ``ctest`` suite): all 16777216 Y/Cb/Cr combinations and a padded,
+odd-height frame are compared with unmodified upstream PL_MPEG's RGB888
+conversion truncated to RGB565.
 
 The finite simulator fixture substitutes host-file input and a checksum renderer
 for USB and physical SPI. It exercises the production MPEG decoder/receiver
