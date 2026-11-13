@@ -12,6 +12,13 @@ void XUH_Manager(chanend epChans_out[], unsigned epChanCount_out,
 
 XUH_Ep XUH_InitEp(chanend c);
 
+/* Bind an idle, non-control channel slot to a device bEndpointAddress.
+ * Channel slots are independent of USB endpoint numbers. The caller must use
+ * an IN slot for an IN address and an OUT slot for an OUT address. Resets the
+ * data toggle to DATA0; call after SET_CONFIGURATION, before the first transfer.
+ * Returns 0, or -1 for a null handle/reserved or control endpoint address. */
+int XUH_SetEndpointAddress(XUH_Ep ep, unsigned address);
+
 
 int XUH_InTransfer(XUH_Ep ep, unsigned char buffer[]);
 

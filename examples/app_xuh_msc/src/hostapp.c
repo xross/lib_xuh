@@ -151,6 +151,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
     unsigned char spBuffer[MAX_EP0_PKT_SIZE];
     int length;
     int tmp;
+    unsigned bulk_out = 0, bulk_in = 0;
 
     USB_Descriptor_Device_t deviceDesc;
     USB_Descriptor_String_t productStringDesc;
@@ -242,6 +243,7 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
 
                 /* Update interface */
 			    interface = (USB_Descriptor_Interface_t*) buffPtr;
+                bulk_out = bulk_in = 0;
 
                 // TODO:    Save Ep Data to an array or similar (to pass to app EP cores)
                 // TODO:    Need to set devAccepted to 1 at some point! - Pass to NextInterfaceEP?
@@ -251,6 +253,11 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
             else
             {
 		        USB_Descriptor_Endpoint_t* EndpointDesc = (USB_Descriptor_Endpoint_t*)buffPtr;
+                /* Channel slots need not match the device's endpoint numbers. */
+                if (EndpointDesc->bEndpointAddress & USB_EPDIR_MASK)
+                    bulk_in = EndpointDesc->bEndpointAddress;
+                else
+                    bulk_out = EndpointDesc->bEndpointAddress;
                 /* Found an EP! Retrieve the endpoint address from the endpoint descriptor */
                 //printstr("Found ep at addr: ");
                 //printhexln(EndpointDesc->bEndpointAddress);
@@ -296,6 +303,12 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
     XUH_SetupTransfer(ep_out, spBuffer);
 
     length = XUH_InTransfer(ep_in, buffer);
+    if (XUH_SetEndpointAddress(ep_out2, bulk_out) ||
+        XUH_SetEndpointAddress(ep_in1, bulk_in)) {
+        printf("USB: configuration/endpoint binding failed\n");
+        return;
+    }
+    printf("USB: bulk OUT=0x%02x IN=0x%02x\n", bulk_out, bulk_in);
 
     /* Device kinda up and running now.. lets try and do some mass storage stuff... */
 

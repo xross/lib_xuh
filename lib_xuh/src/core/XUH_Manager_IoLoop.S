@@ -501,6 +501,11 @@ XUH_RxALow:                         // Framing signal low
 
 .align 16
 OutTail0:
+    // Final complete word: two payload bytes followed by two CRC bytes.
+    ldaw    r6, r6[r9]
+    ldc     r10, 0
+    st16    r11, r6[r10]
+    add     r9, r9, 1
     bu      OutTailDone
 
 .align 16
