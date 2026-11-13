@@ -6,6 +6,7 @@
 #include <string.h>
 #include <xcore/hwtimer.h>
 #include "jpeg.h"
+#include "fps_overlay.h"
 
 /* Tile 1: double-buffered compressed input, single full-screen RGB output.
  * Only the loader writes input, only the decoder writes RGB.
@@ -162,6 +163,9 @@ static void receive_play(chanend c_image, chanend c_render)
 {
     unsigned expected = 0, pending = 0, stats[PIPELINE_STATS_WORDS] = {0};
     unsigned ack[3];
+#if APP_XUH_MSC_FPS_OVERLAY
+    fps_overlay_t fps = {0};    /* Per play: the first window restarts with it. */
+#endif
     while (1) {
         unsigned sequence = chanend_in_word(c_image);
         unsigned width = chanend_in_word(c_image);
@@ -190,6 +194,9 @@ static void receive_play(chanend c_image, chanend c_render)
         }
         chanend_check_control_token(c_image, XS1_CT_END);
         stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;
+#if APP_XUH_MSC_FPS_OVERLAY
+        fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
+#endif
 #if PIPELINE_VERIFY
         unsigned hash = frame_hash(lcd_frames[slot], sizeof(lcd_frames[slot]));
         lcd_hash[slot] = hash;

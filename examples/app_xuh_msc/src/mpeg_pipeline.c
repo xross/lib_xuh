@@ -8,6 +8,7 @@
 #include <xcore/hwtimer.h>
 #include "mpeg.h"
 #include "yuv_rgb565.h"
+#include "fps_overlay.h"
 
 /* Tile 1: two filesystem input chunks (one being read ahead while the other is
  * fed), plus lib_mpeg's static arena.
@@ -203,6 +204,9 @@ static void record_render(unsigned stats[], unsigned ack[], unsigned expected)
 static void receive_play(chanend c_image, chanend c_render)
 {
     unsigned expected = 0, pending = 0, ack[3], stats[PIPELINE_STATS_WORDS] = {0};
+#if APP_XUH_MSC_FPS_OVERLAY
+    fps_overlay_t fps = {0};    /* Per play: the first window restarts with it. */
+#endif
     for (;;) {
         unsigned sequence = chanend_in_word(c_image);
         unsigned width = chanend_in_word(c_image);
@@ -223,6 +227,9 @@ static void receive_play(chanend c_image, chanend c_render)
         }
         chanend_check_control_token(c_image, XS1_CT_END);
         stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;
+#if APP_XUH_MSC_FPS_OVERLAY
+        fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
+#endif
 #if PIPELINE_VERIFY
         lcd_hash[slot] = hash_bytes(lcd_frames[slot], sizeof(lcd_frames[slot]));
 #endif
