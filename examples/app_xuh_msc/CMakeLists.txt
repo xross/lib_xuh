@@ -7,7 +7,14 @@ set(APP_HW_TARGET src/XK-EVK-XU316-AIV.xn CACHE STRING "XN target for app_xuh_ms
 set(APP_INCLUDES src)
 
 set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue -fxscope -mcmodel=large)
-set(APP_XSCOPE_SRCS config.xscope)
+option(APP_XUH_MSC_PROFILE_SILENT "Discard terminal writes and disable xSCOPE for sampled profiling, not FPS measurements" OFF)
+if(APP_XUH_MSC_PROFILE_SILENT)
+    list(REMOVE_ITEM APP_COMPILER_FLAGS -fxscope)
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_PROFILE_SILENT=1)
+    set(APP_XSCOPE_SRCS "")
+else()
+    set(APP_XSCOPE_SRCS config.xscope)
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../deps.cmake)
 
