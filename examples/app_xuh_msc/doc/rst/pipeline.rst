@@ -105,6 +105,47 @@ times were load 13.2 ms, decode 95.3 ms, transmit/wait 13.1 ms, receive/convert
 13.1 ms and LCD SPI 41.9 ms. These overlapping stage times must not be summed.
 A clip encoded at 15 FPS therefore plays slower than real time with this build.
 
+That build compiled the JPEG decoder single issue and at ``-Os``: XCommon CMake
+applies the application's ``-mno-dual-issue`` to library sources, and ``lib_jpeg``
+selected ``-Os``. With ``lib_jpeg`` requesting dual issue explicitly and building
+its decoder file at ``-O3``, a 1210-frame, 320 x 240 clip measured:
+
+.. list-table:: Mean MJPEG stage times per frame on hardware (ms)
+   :header-rows: 1
+
+   * - lib_jpeg build
+     - Load
+     - Decode
+     - Transmit/wait
+     - Receive/convert
+     - LCD SPI
+     - FPS
+   * - Single issue, ``-Os``
+     - 11.7
+     - 103.9
+     - 14.4
+     - 14.3
+     - 41.9
+     - 8.45
+   * - Dual issue, ``-Os``
+     - 11.7
+     - 91.9
+     - 13.5
+     - 13.1
+     - 41.9
+     - 9.48
+   * - Dual issue, decoder at ``-O3``
+     - 11.7
+     - 82.6
+     - 13.5
+     - 13.1
+     - 41.9
+     - 10.40
+
+All three played every frame with zero errors. This needs a ``lib_jpeg`` revision
+that contains the flag change (xmos/lib_jpeg pull request 19); the revision
+pinned in ``examples/deps.cmake`` predates it.
+
 Elapsed time accumulates unsigned reference-timer deltas after each frame into
 a 64-bit total, supporting clips longer than the 32-bit timer's wrap period.
 Each individual frame operation must complete within one timer period (42.9 s).
@@ -126,6 +167,34 @@ and disk errors. From the lib_xuh root, with a native sanitizer-capable compiler
       examples/app_xuh_msc/src/mjpeg_reader.c -o /tmp/mjpeg-reader-test
     /tmp/mjpeg-reader-test
 
+Shared loader
+-------------
+
+Both players use one storage-independent loader, ``src/video_loader.c``. A
+*source* supplies units through open/read/close callbacks: one complete JPEG
+frame for MJPEG, or one chunk of at most 4096 bytes for MPEG-1. The FatFs-backed
+sources are in ``src/msctest.c``; the simulator test supplies stdio-backed ones.
+
+The loader fills the alternate input slot while the decoder still owns the
+current one, waits for the previous unit's acknowledgement, then publishes
+``[slot, sequence, bytes]``. End of input, or an open/read/close failure, is a
+stop message carrying an error word; the decoder then drains and returns one
+statistics block, whose first words are common to both decoders. A decoder that
+fails acknowledges with a failure flag and refuses further units until the stop
+arrives, so both sides always finish a play in step. The loader also prints the
+completed-frame FPS, startup latency and common stage means.
+
+Frame-rate overlay
+------------------
+
+Both players draw the measured frame rate, for example ``17.1 FPS``, in white on
+a black box at the top left of each frame (``src/fps_overlay.c``). The rate is
+the number of frames staged for display over windows of about half a second,
+measured on tile 0; nothing is drawn until the first window completes. Drawing
+costs about 0.1 FPS. Build with ``-DAPP_XUH_MSC_FPS_OVERLAY=0`` to leave frames
+untouched; the simulator pipeline test does this because it compares frame
+hashes with a reference.
+
 MPEG-1 playback
 ---------------
 
@@ -136,12 +205,14 @@ backend supports I, P and B pictures. The encoded frame rate is ignored for this
 initial implementation: every frame is decoded and sent to the LCD as fast as
 possible, with no pacing, intentional skipping or audio.
 
-The USB manager remains a separate task on tile 1. The FatFs task services
-decoder requests using one 4096-byte tile-local input chunk. The decoder copies
-each feed into its 32 KiB input buffer in the 384 KiB static arena; the chunk can
-then be reused. Neither MPEG file reads nor display backpressure run inside the
-USB manager. This first implementation does not prefetch filesystem reads during
-decoder execution.
+The USB manager remains a separate task on tile 1. The FatFs task runs the
+read-ahead loader described under `Shared loader`_, with two 4096-byte
+tile-local input chunks: while the decoder owns one, the next is read from the
+stick. The decoder copies a chunk into its 32 KiB input buffer in the 384 KiB
+static arena, in several feeds if the buffer is nearly full, and releases the
+chunk when it next asks for input. Releasing it any earlier would block the
+decoder behind the loader's read in progress. Neither MPEG file reads nor
+display backpressure run inside the USB manager.
 
 The decoder/transmitter is one additional tile-1 task. It sends each picture as
 two-row YUV420 strips to tile 0, using the library's plane strides. It waits for
@@ -168,32 +239,39 @@ playback after draining earlier valid frames.
 
 xSCOPE reports decoded/displayed counts, errors, decoder status, compressed
 bytes read, arena peak/live-after-close, startup latency and completed-frame FPS.
-Stage means cover load, feed, decode, transmit/wait, receive/convert and LCD SPI.
+Stage means cover load, decode, transmit/wait, receive/convert and LCD SPI, and
+a second line gives the decoder's feed time and its wait for the loader.
 Elapsed reference-timer deltas accumulate into a 64-bit total; each operation
 must complete within one 32-bit timer period.
 
-Load, feed, decode and transmit/wait run one after another in the decoder's
-request loop on tile 1, so their sum is the frame period. Receive/convert runs
-on tile 0 during transmit/wait, and LCD SPI overlaps the following frame's
-decode; neither adds to the frame period while it is shorter than that sum.
+Wait for loader, feed, decode and transmit/wait run one after another in the
+decoder task on tile 1, so their sum is the frame period. Load now overlaps
+decoding and only costs the frame period what appears as wait for loader.
+Receive/convert runs on tile 0 during transmit/wait, and LCD SPI overlaps the
+following frame's decode; neither adds to the frame period while it is shorter
+than that sum.
 
 MPEG-1 measurements
 ~~~~~~~~~~~~~~~~~~~
 
-The ``mpeg1`` build uses approximately 321 KiB on tile 0 and 457 KiB on tile 1 of
+The ``mpeg1`` build uses approximately 321 KiB on tile 0 and 468 KiB on tile 1 of
 512 KiB each, including code, data and stacks.
 
 On XK-EVK-XU316 hardware the 3025-frame, 320 x 240 reference file (25 FPS, GOP
-12, two B pictures, qscale 6; 13570971 bytes) played in 210.351 s, **14.38 FPS**,
-with decoded and displayed counts matching and zero errors. This is below the
-file's encoded rate and just short of 15 FPS. The decoder arena peaked at 379288
-bytes.
+12, two B pictures, qscale 6; 13570971 bytes) played in 165.910 s, **18.23 FPS**,
+with decoded and displayed counts matching and zero errors, and the FPS overlay
+enabled. This is below the file's encoded rate. The decoder arena peaked at
+379288 bytes.
+
+In the table, "Load/wait" is the loader's read time for the first four rows,
+where the decoder waited for every read, and the decoder's wait for the loader
+once reads overlap decoding.
 
 .. list-table:: Mean MPEG-1 stage times per frame on hardware (ms)
    :header-rows: 1
 
    * - Build
-     - Load
+     - Load/wait
      - Feed
      - Decode
      - Transmit/wait
@@ -224,8 +302,39 @@ bytes.
      - 13.5
      - 41.9
      - 14.38
+   * - Plus decoder compiled dual issue
+     - 4.3
+     - 0.1
+     - 40.6
+     - 16.2
+     - 13.5
+     - 41.9
+     - 16.32
+   * - Plus read-ahead loader and FPS overlay
+     - 1.6
+     - 0.1
+     - 40.6
+     - 16.6
+     - 13.4
+     - 41.9
+     - 17.09
+   * - Plus PL_MPEG fork decode optimisations
+     - 1.6
+     - 0.1
+     - 36.9
+     - 16.7
+     - 13.4
+     - 41.9
+     - 18.23
 
-Decode is now about 70% of the 69.5 ms frame period and is the limiting stage.
+The decoder had been compiled single issue: XCommon CMake applies the
+application's ``-mno-dual-issue`` to library sources as well, so ``lib_mpeg`` now
+requests dual issue explicitly. Without the overlay the read-ahead row measured
+17.16 FPS. The last row uses the ``lib_mpeg`` PL_MPEG fork, whose output is
+identical to upstream PL_MPEG.
+
+Decode is now about two thirds of the 54.9 ms frame period and is the limiting
+stage.
 The decoder shares tile 1 with only the USB manager and FatFs tasks, so it
 already has a full logical core. The LCD write is at the wire rate for the
 30 MHz SPI clock and would limit playback at about 24 FPS. These figures are for
@@ -240,12 +349,11 @@ this reservation is not a proven production stack bound.
 Preparing a video-only file
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-From the sibling ``lib_mpeg`` repository::
+``makempeg1.sh``, beside ``makemjpg.sh`` in the application directory, builds the
+demo movie. From ``examples/app_xuh_msc``::
 
-    bash tools/makempeg1.sh \
-      ../lib_xuh/examples/app_xuh_msc/data/crysis/source.mp4 \
-      ../lib_xuh/examples/app_xuh_msc/data/crysis/crysis_meme.jpg \
-      ../lib_xuh/examples/app_xuh_msc/data/VIDEO.M1V
+    bash makempeg1.sh data/crysis/source.mp4 data/crysis/crysis_meme.jpg \
+      data/VIDEO.M1V
 
 This uses a three-second intro followed by the source from seven seconds onward,
 stretches the complete active width to 320 x 240 and removes source-specific
@@ -287,6 +395,8 @@ the physical display or end-to-end hardware throughput. With XTC active::
 
 The runner requires normal termination and all seven completed test cases.
 Its cycle and 240-second host timeout bounds are failures, not functional passes.
+The seven plays took about 15 minutes of host time when last run; pass a larger
+``--timeout`` (for example 2400) where the default is not enough.
 The default smoke fixture is one full-screen I picture per successful play.
 For I/P/B pipeline coverage set ``MPEG_PIPELINE_TEST_FRAMES=3`` when configuring
 the test and pass ``--frames 3`` to the runner. The initial three-picture repeat
