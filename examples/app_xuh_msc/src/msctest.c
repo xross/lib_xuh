@@ -596,8 +596,6 @@ static int play_mpeg1(chanend c_load, unsigned number)
         return 1;
     }
     video_loader_report(number, &play);
-    printf("MPEG decoder input (us per frame): feed=%u wait for loader=%u\n",
-           stats[MPEG_FEED_US] / frames, stats[MPEG_INPUT_WAIT_US] / frames);
     return 0;
 }
 

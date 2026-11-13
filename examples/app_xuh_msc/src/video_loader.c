@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <xcore/hwtimer.h>
+#include "mpeg_pipeline.h"
 
 void video_loader_play(chanend c_load, const video_source_t *source, video_play_t *play)
 {
@@ -65,9 +66,21 @@ void video_loader_report(unsigned number, const video_play_t *play)
            number, frames, elapsed_ms / 1000, (unsigned)(elapsed_ms % 1000), fps / 100, fps % 100);
     printf("Startup to first displayed frame: %u us\n",
            (stats[PIPELINE_FIRST_COMPLETE] - play->start) / 100);
-    printf("Average stage times (us): load=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
-           (unsigned)(play->load_us / frames), stats[PIPELINE_DECODE_TICKS] / frames,
-           stats[PIPELINE_TRANSFER_TICKS] / frames, stats[PIPELINE_CONVERT_TICKS] / frames,
-           stats[PIPELINE_RENDER_TICKS] / frames);
+    printf("Average stage times (us per frame; overlapping stages are not additive):\n");
+    printf("  %-24s %-9s %s\n", "Stage", "Tile", "us/frame");
+    printf("  %-24s %-9s %u\n", "Load", "1", (unsigned)(play->load_us / frames));
+#if MSC_MPEG_PIPELINE
+    printf("  %-24s %-9s %u\n", "Wait for loader", "1", stats[MPEG_INPUT_WAIT_US] / frames);
+    printf("  %-24s %-9s %u\n", "Feed", "1", stats[MPEG_FEED_US] / frames);
+#endif
+    printf("  %-24s %-9s %u\n", "Decode", "1", stats[PIPELINE_DECODE_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Transmit / ack wait", "1 -> 0", stats[PIPELINE_TRANSFER_TICKS] / frames);
+#if MSC_MPEG_PIPELINE
+    printf("  %-24s %-9s %u\n", "Receive YUV / wait", "0", stats[PIPELINE_RECEIVE_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "YUV -> RGB565", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
+#else
+    printf("  %-24s %-9s %u\n", "Receive / RGB565 convert", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
+#endif
+    printf("  %-24s %-9s %u\n", "LCD SPI", "0", stats[PIPELINE_RENDER_TICKS] / frames);
 }
 #endif

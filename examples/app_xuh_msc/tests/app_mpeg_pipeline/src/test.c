@@ -54,12 +54,15 @@ void test_loader(chanend c_load)
         CHECK(!stats[MPEG_ARENA_LIVE]);
         if (test_case != CASE_GOOD) {
             CHECK(!stats[PIPELINE_FRAMES] && stats[PIPELINE_ERRORS]);
+            CHECK(!stats[PIPELINE_RECEIVE_TICKS] && !stats[PIPELINE_CONVERT_TICKS]);
             CHECK(test_case == CASE_EMPTY || play.failed);
         } else {
             CHECK(!play.failed && play.units);
             CHECK(stats[PIPELINE_FRAMES] == MPEG_PIPELINE_TEST_FRAMES &&
                   stats[MPEG_DECODED_FRAMES] == MPEG_PIPELINE_TEST_FRAMES);
             CHECK(!stats[PIPELINE_ERRORS]);
+            CHECK(stats[PIPELINE_RECEIVE_TICKS] && stats[PIPELINE_CONVERT_TICKS]);
+            if (number == 1) video_loader_report(number, &play);
         }
         printf("PASS: pipeline play=%u frames=%u errors=%u live=%u\n", number,
                stats[PIPELINE_FRAMES], stats[PIPELINE_ERRORS], stats[MPEG_ARENA_LIVE]);

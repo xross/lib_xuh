@@ -263,17 +263,58 @@ playback after draining earlier valid frames.
 
 xSCOPE reports decoded/displayed counts, errors, decoder status, compressed
 bytes read, arena peak/live-after-close, startup latency and completed-frame FPS.
-Stage means cover load, decode, transmit/wait, receive/convert and LCD SPI, and
-a second line gives the decoder's feed time and its wait for the loader.
+The per-play stage table gives mean microseconds per displayed frame and labels
+where each stage runs:
+
+.. list-table:: MPEG-1 timing scopes
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - Timed work
+   * - Load
+     - 1
+     - Filesystem reads; overlaps decoding through read-ahead
+   * - Wait for loader
+     - 1
+     - Decoder waiting for the next input chunk
+   * - Feed
+     - 1
+     - Copying compressed input into the decoder
+   * - Decode
+     - 1
+     - Producing the next decoded YUV420 picture
+   * - Transmit / ack wait
+     - 1 to 0 (timed on 1)
+     - Sending planar YUV and waiting for the receiver's acknowledgement
+   * - Receive YUV / wait
+     - 0
+     - Receiving strip payload words, including waiting for incoming data
+   * - YUV to RGB565
+     - 0
+     - Converting the received strips into the existing LCD framebuffer
+   * - LCD SPI
+     - 0
+     - Sending the framebuffer to the physical display
+
+MPEG reception and conversion are timed separately around each two-row strip.
+Tick deltas are accumulated per frame before conversion to microseconds, to
+avoid per-strip rounding loss. These scopes exclude frame headers, CT_END,
+overlay work and waits for the LCD renderer or return acknowledgement; transmit
+time still covers the complete handoff. Extra timer reads add a small measurement
+overhead, but no image buffers or tasks are added. Reports are printed only after
+playback drains. JPEG retains its combined receive/conversion timing.
+
 Elapsed reference-timer deltas accumulate into a 64-bit total; each operation
 must complete within one 32-bit timer period.
 
 Wait for loader, feed, decode and transmit/wait run one after another in the
 decoder task on tile 1, so their sum is the frame period. Load now overlaps
 decoding and only costs the frame period what appears as wait for loader.
-Receive/convert runs on tile 0 during transmit/wait, and LCD SPI overlaps the
-following frame's decode; neither adds to the frame period while it is shorter
-than that sum.
+Reception and conversion run on tile 0 during transmit/wait, and LCD SPI overlaps
+the following frame's decode. These overlapping timings must not be added to the
+tile-1 frame-period sum. The sender can block while tile 0 converts each strip,
+so faster conversion can shorten transmit/wait as well.
 
 MPEG-1 measurements
 ~~~~~~~~~~~~~~~~~~~
@@ -291,13 +332,17 @@ successfully. The FPS overlay was enabled. This is below the file's encoded
 rate. The decoder arena peaked at 379288 bytes and had zero live allocations
 after each close.
 
-The fresh stage means were decode 36858 us, transmit/wait 16718 us,
+The recorded stage means were decode 36858 us, transmit/wait 16718 us,
 receive/convert 13407 us and LCD SPI 41908 us. Loader reads averaged 4350 us,
 overlapping decoding; feed averaged 97 us. The decoder's loader wait averaged
 1602 us on play 1 and 1144 us on play 2. The first decoder wait includes startup
 before the loader begins playback, so use the second play for steady-state
 stage accounting: wait + feed + decode + transmit totals about 54.8 ms/frame.
 This is a whole-file average, not a worst-picture-time bound.
+These measurements predate the separate receive/conversion counters: their
+13407 us combined value cannot be split retrospectively. New hardware runs are
+needed to populate the separate figures; the table below preserves the original
+combined measurements.
 
 In the table, "Load/wait" is the loader's read time for the first four rows,
 where the decoder waited for every read, and the decoder's wait for the loader
@@ -309,12 +354,12 @@ second play.
    :header-rows: 1
 
    * - Build
-     - Load/wait
-     - Feed
-     - Decode
-     - Transmit/wait
-     - Receive/convert
-     - LCD SPI
+     - Load/wait (tile 1)
+     - Feed (tile 1)
+     - Decode (tile 1)
+     - Transmit/wait (tile 1 to 0)
+     - Receive/convert (tile 0)
+     - LCD SPI (tile 0)
      - FPS
    * - Initial scalar conversion
      - 4.3

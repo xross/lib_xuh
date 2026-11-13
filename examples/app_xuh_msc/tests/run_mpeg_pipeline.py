@@ -2,6 +2,7 @@
 """Bounded simulator test with native-decoder RGB565 hashes; no USB/LCD model."""
 import argparse
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -73,6 +74,9 @@ def main():
     marker = "PASS: MPEG pipeline repeat, EOF drain, open/read/empty errors and recovery"
     if marker not in log or log.count("PASS: pipeline play=") != 7:
         raise SystemExit("FAIL: incomplete pipeline test")
+    for stage in ("Receive YUV / wait", "YUV -> RGB565"):
+        if not re.search(rf"^\s+{re.escape(stage)}\s+0\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
+            raise SystemExit(f"FAIL: missing tile-0 timing for {stage}")
     for number, value in enumerate(hashes):
         if log.count(f"RGB565 frame={number} hash={value}") != 4:
             raise SystemExit("FAIL: missing or mismatched RGB565 frame")

@@ -56,6 +56,11 @@ static void send_row(chanend c_image, const unsigned char *row, unsigned bytes)
     }
 }
 
+/* Send decoded planar YUV420 from tile 1 to the tile-0 receiver.
+ * Each payload word carries four 8-bit Y, Cb or Cr samples, not RGB pixels.
+ * Tile 0 converts each two-row strip to RGB565. Wait for its acknowledgement
+ * before decoding can reuse the source planes. This handoff can block on
+ * reception/conversion and on the receiver waiting for the LCD renderer. */
 static void send_frame(chanend c_image, const mpeg_frame_t *frame)
 {
     asm volatile("" ::: "memory");
@@ -219,19 +224,33 @@ static void receive_play(chanend c_image, chanend c_render)
         if (sequence != expected) ++stats[PIPELINE_ERRORS];
         ++expected;
         unsigned slot = sequence & 1;
-        unsigned start = get_reference_time();
+        unsigned receive_ticks = 0, convert_ticks = 0;
         for (unsigned y = 0; y < height; y += 2) {
+            unsigned start = get_reference_time();
             for (unsigned index = 0; index < sizeof(strip) / sizeof(strip[0]); ++index)
                 strip[index] = chanend_in_word(c_image);
+            /* Keep strip writes and conversion on their respective sides of
+             * this timing boundary. Reception includes blocked channel time. */
+            asm volatile("" ::: "memory");
+            unsigned received = get_reference_time();
+            asm volatile("" ::: "memory");
             /* The strip holds Y row, Y row, Cb row, Cr row without padding. */
             const unsigned char *rows = (const unsigned char *)strip;
             unsigned char *output = lcd_frames[slot] + y * width * 2;
             mpeg_yuv420_rows_to_rgb565(rows, rows + width, rows + 2 * width,
-                                       rows + 2 * width + width / 2,
-                                       output, output + width * 2, width);
+                                        rows + 2 * width + width / 2,
+                                        output, output + width * 2, width);
+            asm volatile("" ::: "memory");
+            unsigned converted = get_reference_time();
+            receive_ticks += received - start;
+            convert_ticks += converted - received;
         }
         chanend_check_control_token(c_image, XS1_CT_END);
-        stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;
+        /* Convert units once per frame, not per strip, to avoid accumulating
+         * fractional-microsecond truncation over 120 strips. Header/END,
+         * overlay work and renderer/ack waits are outside these two totals. */
+        stats[PIPELINE_RECEIVE_TICKS] += receive_ticks / 100;
+        stats[PIPELINE_CONVERT_TICKS] += convert_ticks / 100;
 #if APP_XUH_MSC_FPS_OVERLAY
         fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
 #endif

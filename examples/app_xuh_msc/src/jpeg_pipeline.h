@@ -1,3 +1,4 @@
+
 #ifndef JPEG_PIPELINE_H_
 #define JPEG_PIPELINE_H_
 
@@ -38,6 +39,8 @@ enum {
     PIPELINE_LAST_COMPLETE,
     /* Stage totals below are microseconds, not raw timer ticks. */
     PIPELINE_TRANSFER_TICKS,
+    PIPELINE_RECEIVE_TICKS, /* MPEG YUV strip reception, including channel waits. */
+    /* MPEG: conversion only. JPEG: combined reception and conversion. */
     PIPELINE_CONVERT_TICKS,
     PIPELINE_RENDER_TICKS,
     PIPELINE_DECODE_TICKS,
