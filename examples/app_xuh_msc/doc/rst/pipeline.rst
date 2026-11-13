@@ -256,18 +256,32 @@ than that sum.
 MPEG-1 measurements
 ~~~~~~~~~~~~~~~~~~~
 
-The ``mpeg1`` build uses approximately 321 KiB on tile 0 and 468 KiB on tile 1 of
-512 KiB each, including code, data and stacks.
+The ``mpeg1`` build measured here used 330336 bytes (322.6 KiB) on tile 0 and 478948
+bytes (467.7 KiB) on tile 1 of 512 KiB each, including code, data and stacks.
+Tile 1 has 45340 bytes remaining. These totals include the provisional decoder
+stack reservation and retain the linker callback-analysis caveats.
 
 On XK-EVK-XU316 hardware the 3025-frame, 320 x 240 reference file (25 FPS, GOP
-12, two B pictures, qscale 6; 13570971 bytes) played in 165.910 s, **18.23 FPS**,
-with decoded and displayed counts matching and zero errors, and the FPS overlay
-enabled. This is below the file's encoded rate. The decoder arena peaked at
-379288 bytes.
+12, two B pictures, qscale 6; 13570971 bytes) played in 165.878 s, **18.23 FPS**,
+on each of two complete consecutive plays on 2026-11-13. Both
+plays decoded and displayed 3025 frames with zero errors, and play 3 reopened
+successfully. The FPS overlay was enabled. This is below the file's encoded
+rate. The decoder arena peaked at 379288 bytes and had zero live allocations
+after each close.
+
+The fresh stage means were decode 36858 us, transmit/wait 16718 us,
+receive/convert 13407 us and LCD SPI 41908 us. Loader reads averaged 4350 us,
+overlapping decoding; feed averaged 97 us. The decoder's loader wait averaged
+1602 us on play 1 and 1144 us on play 2. The first decoder wait includes startup
+before the loader begins playback, so use the second play for steady-state
+stage accounting: wait + feed + decode + transmit totals about 54.8 ms/frame.
+This is a whole-file average, not a worst-picture-time bound.
 
 In the table, "Load/wait" is the loader's read time for the first four rows,
 where the decoder waited for every read, and the decoder's wait for the loader
-once reads overlap decoding.
+once reads overlap decoding. The read-ahead row's 1.6 ms is from a first play,
+which includes the wait while the USB device starts up; the last row is a
+second play.
 
 .. list-table:: Mean MPEG-1 stage times per frame on hardware (ms)
    :header-rows: 1
@@ -321,7 +335,7 @@ once reads overlap decoding.
      - 41.9
      - 17.09
    * - Plus PL_MPEG fork decode optimisations
-     - 1.6
+     - 1.1
      - 0.1
      - 36.9
      - 16.7
