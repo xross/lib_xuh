@@ -147,10 +147,18 @@ The decoder/transmitter is one additional tile-1 task. It sends each picture as
 two-row YUV420 strips to tile 0, using the library's plane strides. It waits for
 staging acknowledgement before another decode can invalidate those views. Tile 0
 converts a 960-byte strip into big-endian RGB565 in one of the existing two
-153600-byte LCD framebuffers; it does not allocate a full RGB888 picture. The
-scalar conversion follows PL_MPEG's limited-range BT.601 coefficients. Reception
-of the next frame and SPI rendering of the previous frame overlap. Raw channel
-transactions close with CT_END and ownership handoffs include memory barriers.
+153600-byte LCD framebuffers; it does not allocate a full RGB888 picture.
+Reception of the next frame and SPI rendering of the previous frame overlap. Raw
+channel transactions close with CT_END and ownership handoffs include memory
+barriers.
+
+The conversion follows PL_MPEG's limited-range BT.601 coefficients and is
+bit-exact with its scalar arithmetic. Luma scaling and each channel's clamp,
+RGB565 field placement and byte order are tabulated (about 6 KB of tables on
+tile 0, built on first use), and two pixels are written per 32-bit store. It is
+not VPU-vectorised. The application is built with ``-mno-dual-issue``;
+``yuv_rgb565.c`` and ``mpeg_pipeline.c`` re-enable dual issue through file-specific
+compiler flags because they contain the per-pixel loops.
 
 At EOF the decoder drains delayed reference pictures, closes and checks that
 arena allocations were released. The receiver drains the last LCD transaction
@@ -161,8 +169,67 @@ playback after draining earlier valid frames.
 xSCOPE reports decoded/displayed counts, errors, decoder status, compressed
 bytes read, arena peak/live-after-close, startup latency and completed-frame FPS.
 Stage means cover load, feed, decode, transmit/wait, receive/convert and LCD SPI.
-These overlap and must not be summed. Elapsed reference-timer deltas accumulate
-into a 64-bit total; each operation must complete within one 32-bit timer period.
+Elapsed reference-timer deltas accumulate into a 64-bit total; each operation
+must complete within one 32-bit timer period.
+
+Load, feed, decode and transmit/wait run one after another in the decoder's
+request loop on tile 1, so their sum is the frame period. Receive/convert runs
+on tile 0 during transmit/wait, and LCD SPI overlaps the following frame's
+decode; neither adds to the frame period while it is shorter than that sum.
+
+MPEG-1 measurements
+~~~~~~~~~~~~~~~~~~~
+
+The ``mpeg1`` build uses approximately 321 KiB on tile 0 and 457 KiB on tile 1 of
+512 KiB each, including code, data and stacks.
+
+On XK-EVK-XU316 hardware the 3025-frame, 320 x 240 reference file (25 FPS, GOP
+12, two B pictures, qscale 6; 13570971 bytes) played in 210.351 s, **14.38 FPS**,
+with decoded and displayed counts matching and zero errors. This is below the
+file's encoded rate and just short of 15 FPS. The decoder arena peaked at 379288
+bytes.
+
+.. list-table:: Mean MPEG-1 stage times per frame on hardware (ms)
+   :header-rows: 1
+
+   * - Build
+     - Load
+     - Feed
+     - Decode
+     - Transmit/wait
+     - Receive/convert
+     - LCD SPI
+     - FPS
+   * - Initial scalar conversion
+     - 4.3
+     - 0.1
+     - 49.4
+     - 45.3
+     - 45.3
+     - 41.9
+     - 10.08
+   * - Tabulated conversion
+     - 4.3
+     - 0.1
+     - 49.4
+     - 20.5
+     - 19.1
+     - 41.9
+     - 13.45
+   * - Plus aligned word transfer and dual issue
+     - 4.3
+     - 0.1
+     - 49.4
+     - 15.7
+     - 13.5
+     - 41.9
+     - 14.38
+
+Decode is now about 70% of the 69.5 ms frame period and is the limiting stage.
+The decoder shares tile 1 with only the USB manager and FatFs tasks, so it
+already has a full logical core. The LCD write is at the wire rate for the
+30 MHz SPI clock and would limit playback at about 24 FPS. These figures are for
+one file on one board; other content will decode at different rates.
 
 The first integrated XTC 15.3.1 build reports 321844 bytes on tile 0 and
 467812 bytes on tile 1, leaving 56476 bytes on tile 1. The tile-1 figure includes

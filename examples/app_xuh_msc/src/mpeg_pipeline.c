@@ -1,6 +1,7 @@
 #include "mpeg_pipeline.h"
 
 #if MSC_MPEG_PIPELINE
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <xcore/hwtimer.h>
@@ -10,8 +11,9 @@
 /* Tile 1: one reusable filesystem input chunk, plus lib_mpeg's static arena.
  * Tile 0: two RGB565 framebuffers and one two-row YUV strip. No RGB888 frame. */
 static unsigned char input[MPEG_LOAD_BYTES] __attribute__((aligned(4)));
-static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2];
-static unsigned char strip[PIPELINE_LCD_WIDTH * 3] __attribute__((aligned(4)));
+static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2] __attribute__((aligned(4)));
+static unsigned strip[PIPELINE_LCD_WIDTH * 3 / 4];
+typedef unsigned __attribute__((may_alias)) plane_word_t;
 #if PIPELINE_VERIFY
 static unsigned lcd_hash[2];
 static unsigned hash_bytes(const unsigned char *data, unsigned count)
@@ -36,6 +38,14 @@ unsigned mpeg_pipeline_check_lcd(unsigned slot)
 
 static void send_row(chanend c_image, const unsigned char *row, unsigned bytes)
 {
+    /* Decoder planes are word aligned in practice. Load words directly: a
+     * memcpy from an unknown alignment costs a library call per word on xcore. */
+    if (!((uintptr_t)row & 3)) {
+        const plane_word_t *words = (const plane_word_t *)row;
+        for (unsigned index = 0; index < bytes / 4; ++index)
+            chanend_out_word(c_image, words[index]);
+        return;
+    }
     for (unsigned offset = 0; offset < bytes; offset += 4) {
         unsigned word;
         memcpy(&word, row + offset, sizeof(word));
@@ -154,11 +164,9 @@ static void receive_play(chanend c_image, chanend c_render)
         unsigned slot = sequence & 1;
         unsigned start = get_reference_time();
         for (unsigned y = 0; y < height; y += 2) {
-            for (unsigned offset = 0; offset < sizeof(strip); offset += 4) {
-                unsigned word = chanend_in_word(c_image);
-                memcpy(strip + offset, &word, sizeof(word));
-            }
-            yuv420_strip_to_rgb565(strip, lcd_frames[slot] + y * width * 2, width);
+            for (unsigned index = 0; index < sizeof(strip) / sizeof(strip[0]); ++index)
+                strip[index] = chanend_in_word(c_image);
+            yuv420_strip_to_rgb565((const unsigned char *)strip, lcd_frames[slot] + y * width * 2, width);
         }
         chanend_check_control_token(c_image, XS1_CT_END);
         stats[PIPELINE_CONVERT_TICKS] += (get_reference_time() - start) / 100;

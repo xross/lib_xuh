@@ -56,6 +56,11 @@ endif()
 
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
+# Per-pixel video loops: these options are appended after the application flags,
+# re-enabling dual issue for these two files only.
+set(APP_COMPILER_FLAGS_yuv_rgb565.c -mdual-issue)
+set(APP_COMPILER_FLAGS_mpeg_pipeline.c -mdual-issue)
+
 set(APP_COMPILER_FLAGS_jpeg ${APP_COMPILER_FLAGS} -DAPP_XUH_MSC_ENABLE_MPEG1=0)
 if(APP_HW_TARGET MATCHES "XK-EVK-XU316" AND APP_XUH_MSC_ENABLE_LCD AND NOT APP_XUH_MSC_LCD_TEST_MODE)
     set(MPEG_BACKEND pl_mpeg CACHE STRING "Backend for the MPEG-1 player")

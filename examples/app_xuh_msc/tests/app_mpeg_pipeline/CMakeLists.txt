@@ -14,6 +14,8 @@ set(APP_COMPILER_FLAGS -O3 -g -report -fxscope -mcmodel=large -mno-dual-issue
     -DAPP_XUH_MSC_ENABLE_JPEG=0 -DAPP_XUH_MSC_ENABLE_MPEG1=1
     -DAPP_XUH_MSC_ENABLE_LCD=1 -DAPP_XUH_MSC_LCD_TEST_MODE=0 -DPIPELINE_VERIFY=1
     -DMPEG_PIPELINE_TEST_FRAMES=${MPEG_PIPELINE_TEST_FRAMES})
+set(APP_COMPILER_FLAGS_yuv_rgb565.c -mdual-issue)
+set(APP_COMPILER_FLAGS_mpeg_pipeline.c -mdual-issue)
 include(${CMAKE_CURRENT_LIST_DIR}/../../../deps.cmake)
 set(APP_DEPENDENT_MODULES "${XUH_MPEG_DEPENDENCY}")
 set(MPEG_BACKEND pl_mpeg)
