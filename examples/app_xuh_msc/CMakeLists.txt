@@ -6,7 +6,21 @@ set(APP_HW_TARGET src/XK-EVK-XU316-AIV.xn CACHE STRING "XN target for app_xuh_ms
 
 set(APP_INCLUDES src)
 
+if(APP_HW_TARGET MATCHES "XK-EVK-XU316-AIV")
+    set(APP_XUH_MSC_ACTIVITY_LED_DEFAULT ON)
+else()
+    set(APP_XUH_MSC_ACTIVITY_LED_DEFAULT OFF)
+endif()
+option(APP_XUH_MSC_ACTIVITY_LED "PWM the tile-1 port-32A green/red activity LED" ${APP_XUH_MSC_ACTIVITY_LED_DEFAULT})
+option(APP_XUH_MSC_LED_ACTIVE_LOW "Invert both activity LED outputs" OFF)
+
 set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue -fxscope -mcmodel=large)
+if(APP_XUH_MSC_ACTIVITY_LED)
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_ACTIVITY_LED=1)
+    if(APP_XUH_MSC_LED_ACTIVE_LOW)
+        list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_LED_ACTIVE_LOW=1)
+    endif()
+endif()
 option(APP_XUH_MSC_PROFILE_SILENT "Discard terminal writes and disable xSCOPE for sampled profiling, not FPS measurements" OFF)
 if(APP_XUH_MSC_PROFILE_SILENT)
     list(REMOVE_ITEM APP_COMPILER_FLAGS -fxscope)

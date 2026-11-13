@@ -52,6 +52,70 @@ XCommon fetches missing dependencies but does not update existing sibling repos.
 Use the pinned JPEG/MPEG revisions from ``examples/deps.cmake`` and initialise
 their submodules with ``git submodule update --init --recursive``.
 
+Activity LED
+------------
+
+On the AIV target, tile 1 port 32A bit 0 (green) and bit 1 (red) drive the
+bi-colour LED. The effect is enabled by default for this target only:
+
+* Idle: dim green breathing with a three-second period.
+* USB: green pulses around media initialisation and each multi-sector disk read.
+* Decode: a subdued red undertone around JPEG/MPEG decode calls, excluding
+  channel/LCD waits. Completed frames trigger a full-red accent: 40 ms bright,
+  followed by a 60-ms crossfade back to the activity mix. Green is briefly
+  suppressed so the brighter green die cannot wash out the red.
+* Accents are limited to four per second, with a visible gap even at high FPS;
+  each requires a newly completed frame, rather than a free-running blink.
+* Overlapping activity between accents mixes into yellow/orange shades.
+* A reported disk, file or video-pipeline error overrides activity with two
+  80-ms red flashes every second, latched until reset. A blocked USB operation
+  remains green/busy; this is not a USB timeout or a hardware watchdog.
+
+The LED task runs on tile 1, uses one additional logical core and hardware timer,
+and sleeps between at most three edges of each 1-kHz PWM period. Brightness is
+updated every 5 ms, with a fast attack, approximately 160-ms fade from full
+brightness and integer gamma correction. Each producer publishes a single
+tile-local word; there is no LED channel handshake or lock in the playback path.
+Short operations and completed frames have independent generation counters,
+so starting the next decode cannot erase the last frame-completion event.
+The JPEG configuration uses five tile-1 tasks with the LED; MPEG-1 uses four.
+
+The outputs assume active-high LEDs, keep other port-32A output bits low, and
+must not share ownership of that port with another task. Other enabled,
+narrower ports retain their hardware pin precedence. Check board wiring before
+enabling this on another target. For active-low LEDs, configure with
+``-DAPP_XUH_MSC_LED_ACTIVE_LOW=ON``.
+
+For uninstrumented benchmarks, configure with
+``-DAPP_XUH_MSC_ACTIVITY_LED=OFF``. This removes the LED task and compiles out
+the activity hooks; it does not claim zero overhead when the effect is enabled.
+The portable effect/PWM test can be run from the repository root::
+
+    cc -std=c99 -Wall -Wextra -Werror -fsanitize=address,undefined \
+      -Iexamples/app_xuh_msc/src examples/app_xuh_msc/src/activity_led.c \
+      examples/app_xuh_msc/tests/activity_led_test.c -o /tmp/activity_led_test
+    /tmp/activity_led_test
+
+This checks breathing, colour independence/mixing, fade-out, short operations,
+completed-frame accents and rate limiting, latched fault timing, generation
+wrap and all 65536 PWM duty combinations.
+It does not validate physical LED polarity, PWM jitter or playback FPS on hardware.
+
+A bounded two-task simulator fixture exercises the real timer, port and mailbox
+code. With XTC Tools active, from the repository root::
+
+    xcc -target=XK-EVK-XU316 -O3 -g -DAPP_XUH_MSC_ACTIVITY_LED=1 \
+      -Iexamples/app_xuh_msc/src examples/app_xuh_msc/src/activity_led.c \
+      examples/app_xuh_msc/tests/app_activity_led/src/main.xc \
+      examples/app_xuh_msc/tests/app_activity_led/src/test.c -o /tmp/activity_led.xe
+    xsim --max-cycles 100000000 /tmp/activity_led.xe
+
+It must print ``PASS: tile-1 LED task`` and exit normally before the cycle limit;
+also apply a host-process timeout when automating it. Repeat the compile with
+``-DAPP_XUH_MSC_LED_ACTIVE_LOW=1`` to check inverted outputs too. The fixture
+samples the simulated pins without changing port direction; it does not require
+USB or an LCD and does not run on the board as part of the native test.
+
 MJPEG playback
 --------------
 

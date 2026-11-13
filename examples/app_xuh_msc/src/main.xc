@@ -9,6 +9,7 @@
 #include "usbh.h"
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
+#include "activity_led.h"
 
 #if APP_XUH_MSC_ENABLE_LCD
 #include <spi.h>
@@ -63,6 +64,9 @@ void main()
 
     par
     {
+#if APP_XUH_MSC_ACTIVITY_LED
+        on tile[1]: activity_led_task();
+#endif
 #if APP_XUH_MSC_ENABLE_LCD
         on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
                                null, p_lcd_cs, 1, lcd_spi_clock);

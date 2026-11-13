@@ -1,4 +1,3 @@
-
 #include <xs1.h>
 #include <print.h>
 #include <xcore/chanend.h>
@@ -28,6 +27,7 @@ unsigned int get_time(void);
 #include "mpeg_pipeline.h"
 #include "mjpeg_reader.h"
 #include "video_loader.h"
+#include "activity_led.h"
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
@@ -322,7 +322,10 @@ DSTATUS disk_initialize (
 )
 {
     if (ifNum != 0) return STA_NOINIT;
-    if(XUH_MSDSCSIMediaInitialise())
+    activity_led_usb(ACTIVITY_LED_BUSY);
+    int failed = XUH_MSDSCSIMediaInitialise();
+    activity_led_usb(failed ? ACTIVITY_LED_ERROR : 0);
+    if(failed)
     {
         return STA_NOINIT;
     }
@@ -355,7 +358,10 @@ DRESULT disk_read (
     while (count)
     {
         nSector = count < MSC_MAX_READ_SECTORS ? count : MSC_MAX_READ_SECTORS;
-        if (XUH_MSDSCSISectorRead(sector, nSector, buff))
+        activity_led_usb(ACTIVITY_LED_BUSY);
+        int failed = XUH_MSDSCSISectorRead(sector, nSector, buff);
+        activity_led_usb(failed ? ACTIVITY_LED_ERROR : 0);
+        if (failed)
         {
             return RES_ERROR;
         }
@@ -419,16 +425,19 @@ DRESULT disk_ioctl (BYTE IfNum, BYTE ctrl, void* Buff)
 
 void die(FRESULT rc ) /* Stop with dying message */
 {
+  activity_led_usb(ACTIVITY_LED_ERROR);
   printf("\nFailed with rc=%u.\n", rc);
   for(;;);
 }
 void mountdie(FRESULT rc ) /* Stop with dying message */
 {
+  activity_led_usb(ACTIVITY_LED_ERROR);
   printf("\nmountFailed with rc=%u.\n", rc);
   for(;;);
 }
 void opendie(FRESULT rc ) /* Stop with dying message */
 {
+  activity_led_usb(ACTIVITY_LED_ERROR);
   printf("\nopenFailed with rc=%u.\n", rc);
   for(;;);
 }
@@ -555,6 +564,7 @@ static int play_mjpeg(chanend c_load, unsigned number)
     printf("Pipeline drained: loaded=%u displayed=%u sequence/ownership/integrity errors=%u\n",
            play.units, frames, play.stats[PIPELINE_ERRORS]);
     if (play.failed || play.stats[PIPELINE_ERRORS] || frames != play.units || !frames) {
+        activity_led_usb(ACTIVITY_LED_ERROR);
         printf("MJPEG playback failed\n");
         return 1;
     }
@@ -615,6 +625,7 @@ static int play_mpeg1(chanend c_load, unsigned number)
            (int)stats[MPEG_DECODE_STATUS], mpeg_bytes);
     printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
     if (play.failed || stats[PIPELINE_ERRORS] || frames != stats[MPEG_DECODED_FRAMES] || !frames) {
+        activity_led_usb(ACTIVITY_LED_ERROR);
         printf("MPEG-1 playback failed\n");
         return 1;
     }

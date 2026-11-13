@@ -1,5 +1,6 @@
 #include "mpeg_pipeline.h"
 #include "video_loader.h"
+#include "activity_led.h"
 
 #if MSC_MPEG_PIPELINE
 #include <stdint.h>
@@ -107,12 +108,15 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         while (result >= 0) {
             mpeg_frame_t frame;
             unsigned start = get_reference_time();
+            activity_led_decode(ACTIVITY_LED_BUSY);
             result = mpeg_next(&frame);
             decode_us += (get_reference_time() - start) / 100;
+            activity_led_decode(result < 0 ? ACTIVITY_LED_ERROR : 0);
             if (result == MPEG_FRAME) {
                 /* Fixed full-screen protocol; reject before publishing a frame. */
                 if (frame.width != PIPELINE_LCD_WIDTH || frame.height != PIPELINE_LCD_HEIGHT ||
                     frame.number != decoded) { result = MPEG_UNSUPPORTED; break; }
+                activity_led_decode(ACTIVITY_LED_FRAME);
                 start = get_reference_time();
                 send_frame(c_image, &frame, &send_us, &ack_wait_us);
                 transfer_us += (get_reference_time() - start) / 100;
@@ -194,6 +198,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         if (result != MPEG_END || !decoded || stats[MPEG_ARENA_LIVE] || stats[PIPELINE_FRAMES] != decoded)
             ++stats[PIPELINE_ERRORS];
         stats[PIPELINE_ERRORS] += protocol_errors;
+        if (stats[PIPELINE_ERRORS]) activity_led_decode(ACTIVITY_LED_ERROR);
         stats[PIPELINE_DECODE_TICKS] = decode_us;
         stats[PIPELINE_TRANSFER_TICKS] = transfer_us;
         stats[MPEG_FEED_US] = feed_us;

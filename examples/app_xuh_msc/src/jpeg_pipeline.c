@@ -1,5 +1,6 @@
 #include "jpeg_pipeline.h"
 #include "video_loader.h"
+#include "activity_led.h"
 
 #if MSC_JPEG_PIPELINE
 #include <stdio.h>
@@ -68,6 +69,7 @@ static void decode_play(chanend c_load, chanend c_output)
         }
         pending = 0;
         unsigned start = get_reference_time();
+        activity_led_decode(ACTIVITY_LED_BUSY);
         jpeg_decode_info_t info = {0};
         memset(jpeg_rgb, 0, sizeof(jpeg_rgb));
         memset(jpeg_work, 0, sizeof(jpeg_work));
@@ -75,6 +77,8 @@ static void decode_play(chanend c_load, chanend c_output)
             jpeg_input[slot], size, jpeg_rgb, sizeof(jpeg_rgb),
             jpeg_work, sizeof(jpeg_work), JPEG_DECODE_SCALE, &info);
         decode_ticks += (get_reference_time() - start) / 100;
+        activity_led_decode(result == JPEG_DECODE_OK && info.channels == 3 ?
+                            ACTIVITY_LED_FRAME : ACTIVITY_LED_ERROR);
         if (result == JPEG_DECODE_OK && info.channels == 3) {
 #if PIPELINE_VERIFY
             unsigned hash = frame_hash(jpeg_rgb, PIPELINE_RGB_BYTES);
