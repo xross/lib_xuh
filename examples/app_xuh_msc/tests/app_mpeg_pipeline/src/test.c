@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <xcore/hwtimer.h>
 #include "mpeg_pipeline.h"
 #include "video_loader.h"
 
@@ -55,6 +56,8 @@ void test_loader(chanend c_load)
         if (test_case != CASE_GOOD) {
             CHECK(!stats[PIPELINE_FRAMES] && stats[PIPELINE_ERRORS]);
             CHECK(!stats[PIPELINE_RECEIVE_TICKS] && !stats[PIPELINE_CONVERT_TICKS]);
+            CHECK(!stats[MPEG_SEND_US] && !stats[MPEG_ACK_WAIT_US] &&
+                  !stats[PIPELINE_RENDER_WAIT_TICKS]);
             CHECK(test_case == CASE_EMPTY || play.failed);
         } else {
             CHECK(!play.failed && play.units);
@@ -62,6 +65,9 @@ void test_loader(chanend c_load)
                   stats[MPEG_DECODED_FRAMES] == MPEG_PIPELINE_TEST_FRAMES);
             CHECK(!stats[PIPELINE_ERRORS]);
             CHECK(stats[PIPELINE_RECEIVE_TICKS] && stats[PIPELINE_CONVERT_TICKS]);
+            CHECK(stats[MPEG_SEND_US] && stats[MPEG_ACK_WAIT_US]);
+            CHECK(stats[MPEG_SEND_US] + stats[MPEG_ACK_WAIT_US] <= stats[PIPELINE_TRANSFER_TICKS]);
+            if (MPEG_PIPELINE_TEST_FRAMES > 1) CHECK(stats[PIPELINE_RENDER_WAIT_TICKS]);
             if (number == 1) video_loader_report(number, &play);
         }
         printf("PASS: pipeline play=%u frames=%u errors=%u live=%u\n", number,
@@ -73,6 +79,7 @@ void test_loader(chanend c_load)
 
 void test_renderer(chanend c_render)
 {
+    hwtimer_t timer = hwtimer_alloc();
     unsigned expected = 0;
     unsigned expected_hash[MPEG_PIPELINE_TEST_FRAMES];
     FILE *hash_file = fopen("HASHES.TXT", "r");
@@ -87,6 +94,9 @@ void test_renderer(chanend c_render)
         CHECK(ready[0] == (expected & 1) && ready[1] == expected);
         CHECK(expected < MPEG_PIPELINE_TEST_FRAMES);
         CHECK(!mpeg_pipeline_check_lcd(ready[0]));
+        /* Deliberately slower than reception/conversion/decode: early YUV
+         * acknowledgement must not allow reuse of the RGB slot being read. */
+        hwtimer_delay(timer, 10000000);
         const unsigned char *buffer = mpeg_pipeline_lcd_buffer(ready[0]);
         unsigned hash = 2166136261u;
         for (unsigned i = 0; i < PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2; ++i)
@@ -94,7 +104,7 @@ void test_renderer(chanend c_render)
         CHECK(!mpeg_pipeline_check_lcd(ready[0]));
         CHECK(hash == expected_hash[expected]);
         printf("RGB565 frame=%u hash=%08x\n", expected, hash);
-        /* Use zero simulated SPI time; this is not a throughput measurement. */
+        /* Delay is a backpressure fixture, not an SPI throughput measurement. */
         unsigned ack[3] = {expected++, 0, 0};
         pipeline_send(c_render, ack, 3);
     }

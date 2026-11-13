@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded simulator test with native-decoder RGB565 hashes; no USB/LCD model."""
+"""Bounded pipeline test with native-decoder RGB565 hashes; no USB/LCD model."""
 import argparse
 from pathlib import Path
 import re
@@ -21,9 +21,13 @@ def main():
     parser.add_argument("--xe", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=240)
-    parser.add_argument("--frames", type=int, choices=(1, 3), default=1,
+    parser.add_argument("--adapter-id", help="Run on this XTAG instead of the simulator")
+    parser.add_argument("--jtag", action="store_true", help="Hardware fixture built with MPEG_PIPELINE_TEST_XSCOPE=OFF")
+    parser.add_argument("--frames", type=int, choices=(1, 3, 6), default=1,
                         help="Must match the harness MPEG_PIPELINE_TEST_FRAMES setting")
     args = parser.parse_args()
+    if args.jtag and not args.adapter_id:
+        parser.error("--jtag requires --adapter-id")
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     video = work / "VIDEO.M1V"
@@ -60,16 +64,21 @@ def main():
             value = ((value ^ byte) * 16777619) & 0xffffffff
         hashes.append(f"{value:08x}")
     (work / "HASHES.TXT").write_text("\n".join(hashes) + "\n")
-    command = ["xsim", "--max-cycles", "1500000000", "--xscope", "-offline pipeline.xmt", args.xe.resolve()]
+    # Host-file syscalls still need JTAG servicing; --xscope-io-only would
+    # leave fopen/fread blocked even though terminal writes use xSCOPE.
+    command = (["xrun", "--adapter-id", args.adapter_id, "--io" if args.jtag else "--xscope", args.xe.resolve()]
+               if args.adapter_id else
+               ["xsim", "--max-cycles", "1500000000", "--xscope", "-offline pipeline.xmt", args.xe.resolve()])
+    log_path = work / ("xrun.log" if args.adapter_id else "xsim.log")
     try:
         log = run(command, cwd=work, timeout=args.timeout)
     except subprocess.TimeoutExpired as error:
         partial = (error.stdout or b"") + (error.stderr or b"")
         if isinstance(partial, bytes):
             partial = partial.decode(errors="replace")
-        (work / "xsim.log").write_text(partial)
+        log_path.write_text(partial)
         raise SystemExit(f"FAIL: pipeline exceeded {args.timeout} host seconds; no completion established") from error
-    (work / "xsim.log").write_text(log)
+    log_path.write_text(log)
     print(log, end="")
     marker = "PASS: MPEG pipeline repeat, EOF drain, open/read/empty errors and recovery"
     if marker not in log or log.count("PASS: pipeline play=") != 7:
@@ -77,6 +86,10 @@ def main():
     for stage in ("Receive YUV / wait", "YUV -> RGB565"):
         if not re.search(rf"^\s+{re.escape(stage)}\s+0\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
             raise SystemExit(f"FAIL: missing tile-0 timing for {stage}")
+    for stage, tile in (("Send YUV / backpressure", "1 -> 0"), ("Wait receiver ack", "1")):
+        if not re.search(rf"^\s+{re.escape(stage)}\s+{re.escape(tile)}\s+[1-9][0-9]*\s*$",
+                         log, re.MULTILINE):
+            raise SystemExit(f"FAIL: missing sender timing for {stage}")
     for number, value in enumerate(hashes):
         if log.count(f"RGB565 frame={number} hash={value}") != 4:
             raise SystemExit("FAIL: missing or mismatched RGB565 frame")

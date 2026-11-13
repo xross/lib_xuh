@@ -245,12 +245,25 @@ Reception of the next frame and SPI rendering of the previous frame overlap. Raw
 channel transactions close with CT_END and ownership handoffs include memory
 barriers.
 
+For frames after sequence zero, tile 0 acknowledges the YUV planes immediately
+after conversion, overlay and optional integrity hashing, before waiting for
+the previous LCD completion. Tile 1 can decode while tile 0 waits, but its next
+channel send backpressures until tile 0 has published the ready RGB slot. Only
+then does tile 0 receive into the other, released slot. The acknowledgement
+releases YUV ownership, not RGB ownership. Sequence zero still waits for the
+first LCD completion before acknowledging; EOF/stop still drains the last
+published frame before returning statistics. No third framebuffer is needed.
+
 The conversion is ``lib_mpeg``'s ``mpeg_yuv420_rows_to_rgb565()``
 (``mpeg_rgb565.h``), called on tile 0 for each strip. It follows PL_MPEG's
 limited-range BT.601 coefficients and is bit-exact with its scalar arithmetic.
-Luma scaling and each channel's clamp, RGB565 field placement and byte order are
-tabulated (about 6 KB of tables on tile 0, built on first use), and two pixels
-are written per 32-bit store. It is not VPU-vectorised. The application is built
+On XS3 the default converter uses the VPU for 16 pixels in each of two rows,
+including exact BT.601 arithmetic, clipping and high-byte-first RGB565 packing.
+It uses a small stack input block and assembly scratch, not an RGB888 frame or
+lookup tables. ``-DMPEG_RGB565_VPU=OFF`` restores the original scalar lookup-table
+converter (5504 bytes of arrays, built on first use), including its two-pixel
+32-bit stores. Both implementations are bit-exact with the upstream reference.
+The application is built
 with ``-mno-dual-issue``; ``lib_mpeg`` requests dual issue for its own sources,
 and ``mpeg_pipeline.c``, which holds the per-word transfer loops, re-enables it
 through a file-specific compiler flag.
@@ -287,12 +300,21 @@ where each stage runs:
    * - Transmit / ack wait
      - 1 to 0 (timed on 1)
      - Sending planar YUV and waiting for the receiver's acknowledgement
+   * - Send YUV / backpressure
+     - 1 to 0 (timed on 1)
+     - Header, strip payloads and CT_END, including blocked channel output
+   * - Wait receiver ack
+     - 1
+     - Waiting for the final tile-0 acknowledgement after CT_END was sent
    * - Receive YUV / wait
      - 0
      - Receiving strip payload words, including waiting for incoming data
    * - YUV to RGB565
      - 0
      - Converting the received strips into the existing LCD framebuffer
+   * - Wait previous LCD
+     - 0
+     - Waiting for the previous render before publishing the next framebuffer
    * - LCD SPI
      - 0
      - Sending the framebuffer to the physical display
@@ -304,6 +326,15 @@ overlay work and waits for the LCD renderer or return acknowledgement; transmit
 time still covers the complete handoff. Extra timer reads add a small measurement
 overhead, but no image buffers or tasks are added. Reports are printed only after
 playback drains. JPEG retains its combined receive/conversion timing.
+
+``Send YUV / backpressure`` and ``Wait receiver ack`` split the existing total
+``Transmit / ack wait``; they are not additional independent costs. Channel
+output can block while tile 0 converts each strip, so send time is not a pure
+wire-bandwidth measurement. The receiver's ``Wait previous LCD`` counter times
+only the previous-frame acknowledgement receive, excluding overlay work,
+publication overhead, the first-frame display wait and final drain. First-frame
+display waiting is still included in the sender's acknowledgement time. As with
+other stage totals, counters reset each play and are reported as per-frame means.
 
 Elapsed reference-timer deltas accumulate into a 64-bit total; each operation
 must complete within one 32-bit timer period.
@@ -340,9 +371,9 @@ before the loader begins playback, so use the second play for steady-state
 stage accounting: wait + feed + decode + transmit totals about 54.8 ms/frame.
 This is a whole-file average, not a worst-picture-time bound.
 These measurements predate the separate receive/conversion counters: their
-13407 us combined value cannot be split retrospectively. New hardware runs are
-needed to populate the separate figures; the table below preserves the original
-combined measurements.
+13407 us combined value cannot be split retrospectively. The table below
+preserves the original combined measurements; a fresh split-timing comparison
+follows under `VPU colour conversion comparison`_.
 
 In the table, "Load/wait" is the loader's read time for the first four rows,
 where the decoder waited for every read, and the decoder's wait for the loader
@@ -416,8 +447,8 @@ requests dual issue explicitly. Without the overlay the read-ahead row measured
 17.16 FPS. The last row uses the ``lib_mpeg`` PL_MPEG fork, whose output is
 identical to upstream PL_MPEG.
 
-Decode is now about two thirds of the 54.9 ms frame period and is the limiting
-stage.
+In that historical build, decode was about two thirds of the 54.9 ms frame
+period and was the limiting stage.
 The decoder shares tile 1 with only the USB manager and FatFs tasks, so it
 already has a full logical core. The LCD write is at the wire rate for the
 30 MHz SPI clock and would limit playback at about 24 FPS. These figures are for
@@ -428,6 +459,371 @@ The first integrated XTC 15.3.1 build reports 321844 bytes on tile 0 and
 a provisional 16 KiB decoder-task stack reservation because upstream callback
 paths prevent complete automatic sizing. Linker constraints pass with caveats;
 this reservation is not a proven production stack bound.
+
+VPU colour conversion comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A matched scalar/VPU comparison on 2026-11-13 used the same XU316 at 600 MHz,
+ILI9341 panel at 30 MHz SPI, XTC Tools 15.3.1 and the 3025-frame reference file.
+The FPS overlay was enabled. Each build completed two consecutive plays,
+decoding and displaying every frame with zero errors, arena peak 379288 bytes
+and zero live allocations after close. Only ``MPEG_RGB565_VPU`` changed between
+the builds. Both used the same PL_MPEG fork revision; its
+decoder improvements were already present before the VPU work. Compare against
+the fresh **20.20 FPS** baseline, not the historical 18.23 FPS measurement.
+
+.. list-table:: Matched second-play stage means (ms per displayed frame)
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - Scalar
+     - VPU
+   * - Load
+     - 1
+     - 4.350
+     - 4.351
+   * - Wait for loader
+     - 1
+     - 1.269
+     - 1.269
+   * - Feed
+     - 1
+     - 0.097
+     - 0.097
+   * - Decode
+     - 1
+     - 30.581
+     - 30.581
+   * - Transmit / acknowledgement wait
+     - 1 to 0 (timed on 1)
+     - 17.519
+     - 13.748
+   * - Receive YUV / wait
+     - 0
+     - 1.245
+     - 1.245
+   * - YUV to RGB565
+     - 0
+     - 12.369
+     - 5.740
+   * - LCD SPI
+     - 0
+     - 41.905
+     - 41.866
+
+Both scalar plays completed in 149.691 s at **20.20 FPS**. The VPU plays took
+138.284 s and 138.283 s, both **21.87 FPS**: an **8.3%** end-to-end increase.
+The integrated conversion itself is 2.15 times faster; channel receive time and
+decode time are unchanged. The 6.629 ms conversion saving reduces transmit/wait
+by only 3.771 ms because the receiver also waits for the LCD renderer. Timings
+overlap and must not be added as independent stages.
+
+The VPU build uses **331836 bytes on tile 0**, versus 335616 scalar: a net saving
+of **3780 bytes**, despite extra code and stack scratch. Tile 1 is unchanged at
+480820 bytes. The two LCD framebuffers, YUV strip and decoder arena are unchanged;
+the VPU build removes the colour lookup arrays. Linker callback-analysis caveats
+and the provisional decoder stack reservation still apply.
+
+Handoff and acknowledgement timing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A further run with the sender and renderer-wait counters split completed two
+3025-frame plays in 138.278 s each, at **21.87 FPS**, with zero errors, the same
+arena peak and no live allocations after close. The second-play means were:
+
+.. list-table:: VPU handoff breakdown (ms per displayed frame)
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - ms/frame
+   * - Total transmit / acknowledgement wait
+     - 1 to 0 (timed on 1)
+     - 13.746
+   * - Send YUV / backpressure (part of total)
+     - 1 to 0 (timed on 1)
+     - 6.945
+   * - Final receiver acknowledgement (part of total)
+     - 1
+     - 6.801
+   * - Receive YUV / wait
+     - 0
+     - 1.245
+   * - YUV to RGB565
+     - 0
+     - 5.739
+   * - Wait previous LCD
+     - 0
+     - 6.312
+   * - Decode
+     - 1
+     - 30.580
+   * - LCD SPI
+     - 0
+     - 41.864
+
+The channel-send portion overlaps reception and conversion; it is not 6.945 ms
+of raw link transfer followed by those stages. Most final acknowledgement
+waiting corresponds to the receiver waiting for the previous LCD render. The
+remaining difference also includes last-strip work, overlay/protocol overhead
+and the first-frame display wait; those are not individually attributed here.
+The sender's 13.746 ms total is therefore not a channel-bandwidth bottleneck.
+
+The extra counters/reporting increase the VPU build totals by 48 bytes on tile 0
+and 288 bytes on tile 1, to 331884 and 481108 bytes respectively. No image
+buffers, decoder arena storage or tasks are added.
+
+Early YUV acknowledgement
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Moving the non-first-frame acknowledgement after conversion/overlay/hash and
+before the previous-LCD wait completed two further 3025-frame plays in 137.135 s
+and 137.134 s: **22.05 FPS**, versus **21.87 FPS** above (about 0.8% faster).
+Both plays decoded/displayed all frames with zero errors, arena peak 379288
+bytes and zero live allocations after close. Neither decoder nor converter
+arithmetic was changed for this comparison. Second-play means were:
+
+.. list-table:: ACK-only change (ms per displayed frame)
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - Original ACK
+     - Early ACK
+   * - Decode
+     - 1
+     - 30.580
+     - 30.581
+   * - Total transmit / acknowledgement wait
+     - 1 to 0 (timed on 1)
+     - 13.746
+     - 13.357
+   * - Send YUV / backpressure (part of total)
+     - 1 to 0 (timed on 1)
+     - 6.945
+     - 12.868
+   * - Final receiver acknowledgement (part of total)
+     - 1
+     - 6.801
+     - 0.488
+   * - Receive YUV / wait
+     - 0
+     - 1.245
+     - 1.244
+   * - YUV to RGB565
+     - 0
+     - 5.739
+     - 5.761
+   * - Wait previous LCD
+     - 0
+     - 6.312
+     - 18.348
+   * - LCD SPI
+     - 0
+     - 41.864
+     - 41.859
+
+Most of the removed final-ACK wait reappears as backpressure on the next send:
+the decoder can start earlier but tile 0 still owns only two RGB slots. The
+larger previous-LCD wait starts earlier in the overlap schedule; it is not an
+extra additive frame cost or slower SPI. This is a modest measured gain, not
+the full 6.312 ms/frame suggested by the original isolated wait counter.
+First-display startup stayed effectively unchanged (123849 versus 123832 us).
+ILI9341 linker totals became 331828 bytes on tile 0 (56 bytes less) and 481108
+bytes on tile 1 (unchanged); no buffers or tasks were added. ST7789V also builds
+with the same protocol; the physical-panel throughput measurement is ILI9341.
+
+Scalar motion-compensation follow-up
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After measuring the ACK-only build, a separate PL_MPEG change retains packed
+four-pixel scalar arithmetic while reducing word-load overhead:
+
+* Rounded averaging uses an inline function, evaluating load/extract arguments
+  once instead of twice through the old macro.
+* xcore destination reads use the word alignment already required by stores.
+
+The two- and four-sample interpolation biases, and the separately rounded
+bidirectional average, are unchanged. No VPU decoder kernel, lookup table,
+additional frame storage or new task is introduced. ILI9341 linker totals are
+331828 bytes on tile 0 and 481020 bytes on tile 1: unchanged and 88 bytes smaller
+respectively than the ACK-only build. The tile-1 difference is 92 fewer code
+bytes and four more constant/data bytes; its reserved stack total is unchanged.
+The macroblock function's generated assembly has eight LEXTRACT sites rather
+than sixteen and retains the original 18-word local stack requirement. Those
+are static code observations, not measured execution counts or timings.
+
+A preceding experiment also hoisted source alignment and carried overlapping
+aligned loads across inner-loop iterations. It was bit-exact and used 48 fewer
+bytes than ACK-only, but two complete plays each took 138.349 s (**21.86 FPS**).
+Decode on tile 1 increased to 31.451 ms/frame, versus 30.581 ms for ACK-only;
+handoff was 12.880 ms (12.391 send/backpressure plus 0.488 final ACK), tile-0
+receive/conversion were 1.244/5.761 ms, previous-LCD wait was 17.427 ms and LCD
+SPI stayed at 41.859 ms. All 3025 frames displayed with zero errors and unchanged
+arena accounting. That more complex loop was removed rather than retaining a
+memory-saving performance regression. These results do not establish that
+load reuse is intrinsically slower, only that this scalar/compiler arrangement
+did not help this clip. The simplified implementation above is a separate trial.
+
+The simplified version completed two further 3025-frame plays in **135.425 s
+each (22.33 FPS)**, with zero errors, arena peak 379288 bytes and zero live
+allocations after close. Decoder time fell about 4.0% relative to ACK-only, and
+FPS rose about 1.3%. Combined with early ACK, the gain over the instrumented VPU
+baseline is about 2.1% (21.87 to 22.33 FPS), while total linker usage falls by
+144 bytes across both tiles. The retained version changes only single-evaluation
+averaging and aligned destination reads; the load-reuse experiment is not kept.
+
+.. list-table:: Retained scalar fixes, second-play means (ms per displayed frame)
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - ACK only
+     - ACK + simple MC fixes
+   * - Load
+     - 1
+     - 4.350
+     - 4.350
+   * - Wait for loader
+     - 1
+     - 1.269
+     - 1.269
+   * - Feed
+     - 1
+     - 0.097
+     - 0.097
+   * - Decode
+     - 1
+     - 30.581
+     - 29.344
+   * - Total transmit / acknowledgement wait
+     - 1 to 0 (timed on 1)
+     - 13.357
+     - 14.029
+   * - Send YUV / backpressure (part of total)
+     - 1 to 0 (timed on 1)
+     - 12.868
+     - 13.540
+   * - Final receiver acknowledgement (part of total)
+     - 1
+     - 0.488
+     - 0.488
+   * - Receive YUV / wait
+     - 0
+     - 1.244
+     - 1.244
+   * - YUV to RGB565
+     - 0
+     - 5.761
+     - 5.761
+   * - Wait previous LCD
+     - 0
+     - 18.348
+     - 20.094
+   * - LCD SPI
+     - 0
+     - 41.859
+     - 41.859
+
+The faster decoder reaches the next send sooner, increasing backpressure and
+tile 0's earlier-starting previous-LCD wait. These overlapping waits must not
+be summed or interpreted as slower channel transport. SPI is unchanged, with
+an approximately 23.9 FPS full-screen ceiling at this clock rate. First-frame
+display startup improved from 123849 to 123050 us. Both controller selections
+still build; the measured physical display remains ILI9341 at 30 MHz SPI.
+
+All five native sanitizer/reference tests pass, including byte-exact MPEG-1
+comparison with pristine upstream. The standalone xcore macroblock test passes
+2128 independent per-pixel comparisons covering both block sizes, alignments,
+half-pixel modes and bidirectional rounding. The delayed-renderer hardware
+pipeline fixture also passes with the modified decoder and native RGB565 hashes.
+
+Sampled decoder profiling
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+XTC Tools 15.3.1 rejects ``--gprof`` together with ``--xscope``. Use a separate
+``-DAPP_XUH_MSC_PROFILE_SILENT=ON`` build for PC sampling. This disables xSCOPE
+and provides a ``_write`` sink that discards terminal output while retaining
+printf formatting/control flow. It avoids JTAG logging pauses and blocked
+xSCOPE writes without a host receiver. Normal builds retain xSCOPE output.
+
+Keep the production optimisation flags and decoder sources unchanged. Configure
+and build from the repository root::
+
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc -B build-video-profile \
+      -DAPP_XUH_MSC_PROFILE_SILENT=ON -DMPEG_RGB565_VPU=ON \
+      -DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341
+    xmake -C build-video-profile mpeg1 -j 8
+
+Run xgdb in a separate directory to hold the per-tile/core ``.gprof`` files.
+Connect with ``connect --gprof`` (and ``--adapter-id`` if required), ``load``,
+``break video_loader_report``, then ``continue``. This breakpoint is reached only
+after a successful complete play, after the application's frame/error checks.
+Inspect ``number`` and ``*play``, then ``quit`` to flush the profiles. Extract
+the matching executable with ``xobjdump -s`` and use ``xgprof -b`` for function
+samples, ``xgprof -l -b`` for source lines and ``xgprof -C -l -b`` for addresses.
+Find the decoder core from its PL_MPEG symbols rather than assuming a core ID.
+
+Use the separate normal xSCOPE run for FPS and stage timings, not the sampled
+run or this silent build's memory totals. PC sample shares are statistical
+hotspot indicators, including PCs where a core is blocked, not call counts or
+precise subfunction timings.
+
+The completed silent profile reached ``video_loader_report`` with 3025 frames,
+zero errors and decoder status ``MPEG_END``. The decoder ran on **tile 1, core 2**
+in this build. Full-width counters recorded 841376 PC samples at 1979 addresses;
+all mapped into function ranges in the matching application ELF. Of these,
+551242 samples were in PL_MPEG functions:
+
+.. list-table:: Decoder hotspots, normalised to PL_MPEG function samples
+   :header-rows: 1
+
+   * - Work
+     - Tile/core
+     - Samples
+     - Share
+   * - Motion compensation (``plm_video_process_macroblock``)
+     - 1 / 2
+     - 213519
+     - 38.7%
+   * - Block parsing, dequantisation and residual writes (``plm_video_decode_block``)
+     - 1 / 2
+     - 160770
+     - 29.2%
+   * - IDCT (``plm_video_idct``)
+     - 1 / 2
+     - 133798
+     - 24.3%
+   * - Other PL_MPEG functions
+     - 1 / 2
+     - 43155
+     - 7.8%
+
+These are self-PC shares, not inclusive call-graph times. Inline helper loads,
+stores and bit reads are included in their containing ELF function. Motion
+compensation is the largest compute target in this clip, ahead of IDCT. Library
+``memcpy`` had only two samples; it was not a measured hotspot.
+
+The stock ``xgprof`` emitted a DWARF line-table warning. To avoid relying on its
+line attribution or synthetic time units, the table above uses the full 32-bit
+basic-block PC counters mapped directly into ELF function address/size ranges.
+The source-line report omitted some sampled addresses, so it is not used as the
+denominator. Reproduce the complete function accounting from the profile
+directory, using the matching tile-1 application ELF::
+
+    python /path/to/lib_xuh/examples/app_xuh_msc/tests/summarize_mpeg_profile.py \
+      --elf image_n0c1_2.elf --profile 'tile[1]_core2.gprof' \
+      --json decoder-summary.json
+
+The helper's native parser/accounting tests run with::
+
+    python examples/app_xuh_msc/tests/test_profile_summary.py
+
+The handoff counters motivated the early YUV acknowledgement described above.
+The original measurements in the handoff/profile tables predate that change;
+keep them as the baseline rather than attributing LCD waiting to channel
+bandwidth or decoder compute.
 
 Preparing a video-only file
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -451,11 +847,13 @@ its ``ctest`` suite): all 16777216 Y/Cb/Cr combinations and a padded,
 odd-height frame are compared with unmodified upstream PL_MPEG's RGB888
 conversion truncated to RGB565.
 
-The finite simulator fixture substitutes host-file input and a checksum renderer
+The finite pipeline fixture substitutes host-file input and a checksum renderer
 for USB and physical SPI. It exercises the production MPEG decoder/receiver
 tasks, cross-tile strip transfer, native-reference RGB565 hashes, repeated EOF
 drain/restart and open/read/empty-file error recovery. It does not validate USB,
-the physical display or end-to-end hardware throughput. With XTC active::
+the physical display or end-to-end hardware throughput. The checksum renderer
+waits 100 ms before reading each slot, deliberately exercising backpressure and
+detecting a slot overwrite during rendering. With XTC active::
 
     python3 -m venv .venv
     source .venv/bin/activate
@@ -476,6 +874,22 @@ The seven plays took about 15 minutes of host time when last run; pass a larger
 ``--timeout`` (for example 2400) where the default is not enough.
 The default smoke fixture is one full-screen I picture per successful play.
 For I/P/B pipeline coverage set ``MPEG_PIPELINE_TEST_FRAMES=3`` when configuring
-the test and pass ``--frames 3`` to the runner. The initial three-picture repeat
-fixture exceeded the host timeout; that run is not a pass. Independent library
-reference tests already exercise I/P/B decoding and final-picture drain.
+the test and pass ``--frames 3`` to the runner. Use ``6`` for both settings to
+exercise next-frame send backpressure beyond the first delayed render and the
+final drain. Add ``--adapter-id SERIAL`` to
+run the same fixture on hardware instead of xsim (host files remain in the
+fixture directory, not on USB). The stock simulator target routes xSCOPE over
+XL0; the attached AIV board uses XL1. For a finite hardware fixture independent
+of xSCOPE wiring, configure ``-DMPEG_PIPELINE_TEST_XSCOPE=OFF`` and pass
+``--adapter-id SERIAL --jtag`` to the runner. JTAG pauses are acceptable only in
+this substituted functional fixture, never in the real USB player benchmark.
+
+With XTC 15.3.1 on the attached XU316, the six-picture hardware fixture passed
+all seven cases and all 24 RGB565 frame hashes, including delayed rendering,
+EOF drain/restart and error recovery. The corresponding simulator run exceeded
+240 host seconds after frame zero with three pictures; it is not counted as a
+pass. The six-picture JTAG run needed more than 100 host seconds; a bounded
+180-second rerun completed all cases. Earlier hardware
+attempts using the stock target's mismatched xSCOPE link also timed out; the
+JTAG fixture avoids that configuration mismatch. Independent library reference
+tests also exercise I/P/B decoding and final-picture drain.

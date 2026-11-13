@@ -76,8 +76,12 @@ void video_loader_report(unsigned number, const video_play_t *play)
     printf("  %-24s %-9s %u\n", "Decode", "1", stats[PIPELINE_DECODE_TICKS] / frames);
     printf("  %-24s %-9s %u\n", "Transmit / ack wait", "1 -> 0", stats[PIPELINE_TRANSFER_TICKS] / frames);
 #if MSC_MPEG_PIPELINE
+    /* These split the handoff above; do not add them to the total again. */
+    printf("  %-24s %-9s %u\n", "  Send YUV / backpressure", "1 -> 0", stats[MPEG_SEND_US] / frames);
+    printf("  %-24s %-9s %u\n", "  Wait receiver ack", "1", stats[MPEG_ACK_WAIT_US] / frames);
     printf("  %-24s %-9s %u\n", "Receive YUV / wait", "0", stats[PIPELINE_RECEIVE_TICKS] / frames);
     printf("  %-24s %-9s %u\n", "YUV -> RGB565", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Wait previous LCD", "0", stats[PIPELINE_RENDER_WAIT_TICKS] / frames);
 #else
     printf("  %-24s %-9s %u\n", "Receive / RGB565 convert", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
 #endif

@@ -61,9 +61,11 @@ static void send_row(chanend c_image, const unsigned char *row, unsigned bytes)
  * Tile 0 converts each two-row strip to RGB565. Wait for its acknowledgement
  * before decoding can reuse the source planes. This handoff can block on
  * reception/conversion and on the receiver waiting for the LCD renderer. */
-static void send_frame(chanend c_image, const mpeg_frame_t *frame)
+static void send_frame(chanend c_image, const mpeg_frame_t *frame,
+                       unsigned *send_us, unsigned *ack_wait_us)
 {
     asm volatile("" ::: "memory");
+    unsigned start = get_reference_time();
     chanend_out_word(c_image, frame->number);
     chanend_out_word(c_image, frame->width);
     chanend_out_word(c_image, frame->height);
@@ -76,8 +78,14 @@ static void send_frame(chanend c_image, const mpeg_frame_t *frame)
         send_row(c_image, frame->plane[2] + (y / 2) * frame->stride[2], frame->width / 2);
     }
     chanend_out_control_token(c_image, XS1_CT_END);
+    /* This includes channel backpressure while tile 0 receives/converts.
+     * Separate it from the final acknowledgement, which may wait for LCD. */
+    unsigned sent = get_reference_time();
     unsigned ack;
     pipeline_receive(c_image, &ack, 1);
+    unsigned acknowledged = get_reference_time();
+    *send_us += (sent - start) / 100;
+    *ack_wait_us += (acknowledged - sent) / 100;
     if (ack != frame->number) __builtin_trap();
 }
 
@@ -88,6 +96,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
 {
     for (;;) {
         unsigned decoded = 0, decode_us = 0, feed_us = 0, transfer_us = 0, wait_us = 0;
+        unsigned send_us = 0, ack_wait_us = 0;
         unsigned expected = 0, protocol_errors = 0, stopped = 0;
         /* The chunk currently owned by the decoder and how much is still unfed. */
         unsigned held = 0, held_sequence = 0, remaining = 0;
@@ -105,7 +114,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 if (frame.width != PIPELINE_LCD_WIDTH || frame.height != PIPELINE_LCD_HEIGHT ||
                     frame.number != decoded) { result = MPEG_UNSUPPORTED; break; }
                 start = get_reference_time();
-                send_frame(c_image, &frame);
+                send_frame(c_image, &frame, &send_us, &ack_wait_us);
                 transfer_us += (get_reference_time() - start) / 100;
                 ++decoded;
             } else if (result == MPEG_NEED_INPUT) {
@@ -189,6 +198,8 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         stats[PIPELINE_TRANSFER_TICKS] = transfer_us;
         stats[MPEG_FEED_US] = feed_us;
         stats[MPEG_INPUT_WAIT_US] = wait_us;
+        stats[MPEG_SEND_US] = send_us;
+        stats[MPEG_ACK_WAIT_US] = ack_wait_us;
         stats[MPEG_DECODED_FRAMES] = decoded;
         stats[MPEG_DECODE_STATUS] = (unsigned)result;
         pipeline_send(c_load, stats, MPEG_STATS_WORDS);
@@ -257,10 +268,16 @@ static void receive_play(chanend c_image, chanend c_render)
 #if PIPELINE_VERIFY
         lcd_hash[slot] = hash_bytes(lcd_frames[slot], sizeof(lcd_frames[slot]));
 #endif
+        /* YUV is now fully consumed. Release tile 1 before waiting for LCD;
+         * the next send will backpressure until this RGB slot is published.
+         * Sequence zero retains its first-display-complete handshake below. */
+        if (sequence) pipeline_send(c_image, &sequence, 1);
         /* The alternate framebuffer was rendered while this one was filled.
          * Receive completion before publishing the next renderer request. */
         if (pending) {
+            unsigned start = get_reference_time();
             pipeline_receive(c_render, ack, 3);
+            stats[PIPELINE_RENDER_WAIT_TICKS] += (get_reference_time() - start) / 100;
             record_render(stats, ack, sequence - 1);
         }
         unsigned ready[2] = {slot, sequence};
@@ -270,8 +287,8 @@ static void receive_play(chanend c_image, chanend c_render)
             pipeline_receive(c_render, ack, 3);
             record_render(stats, ack, sequence);
             pending = 0;
+            pipeline_send(c_image, &sequence, 1);
         }
-        pipeline_send(c_image, &sequence, 1);
     }
     if (pending) {
         pipeline_receive(c_render, ack, 3);

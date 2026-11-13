@@ -43,13 +43,15 @@ enum {
     /* MPEG: conversion only. JPEG: combined reception and conversion. */
     PIPELINE_CONVERT_TICKS,
     PIPELINE_RENDER_TICKS,
+    /* MPEG receiver blocked on the previous LCD frame, excluding startup/drain. */
+    PIPELINE_RENDER_WAIT_TICKS,
     PIPELINE_DECODE_TICKS,
     PIPELINE_ERRORS,
     PIPELINE_STATS_WORDS
 };
 /* Statistics returned to the loader: the words above plus decoder-specific
  * words (see mpeg_pipeline.h); a decoder without any sends zeros. */
-#define PIPELINE_LOADER_STATS_WORDS (PIPELINE_STATS_WORDS + 6)
+#define PIPELINE_LOADER_STATS_WORDS (PIPELINE_STATS_WORDS + 8)
 
 #if MSC_JPEG_PIPELINE
 void jpeg_pipeline_decode(chanend c_load, chanend c_output);
