@@ -1,11 +1,13 @@
+
 #if APP_XUH_MSC_ENABLE_LCD
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <timer.h>
 #include <xs1.h>
 
-#include "lcd_st7789v.h"
+#include "lcd_display.h"
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
 
@@ -17,15 +19,27 @@
 #define BOX_Y            ((LCD_HEIGHT - BOX_SIZE) / 2)
 #define FRAME_DELAY_MS   16
 
-#define ST7789_SWRESET   0x01
-#define ST7789_SLPOUT    0x11
-#define ST7789_INVON     0x21
-#define ST7789_DISPON    0x29
-#define ST7789_CASET     0x2A
-#define ST7789_RASET     0x2B
-#define ST7789_RAMWR     0x2C
-#define ST7789_MADCTL    0x36
-#define ST7789_COLMOD    0x3A
+/* Commands shared by the ST7789V and ILI9341. */
+#define LCD_SWRESET     0x01
+#define LCD_SLPOUT      0x11
+#define LCD_INVOFF      0x20
+#define LCD_INVON       0x21
+#define LCD_DISPON      0x29
+#define LCD_CASET       0x2A
+#define LCD_RASET       0x2B
+#define LCD_RAMWR       0x2C
+#define LCD_MADCTL      0x36
+#define LCD_COLMOD      0x3A
+
+#define ILI9341_FRMCTR1  0xB1
+#define ILI9341_DFUNCTR  0xB6
+#define ILI9341_PWCTR1   0xC0
+#define ILI9341_PWCTR2   0xC1
+#define ILI9341_VMCTR1   0xC5
+#define ILI9341_VMCTR2   0xC7
+
+#define ILI9341_MADCTL_LANDSCAPE 0x28
+#define ST7789V_MADCTL_LANDSCAPE 0x60
 
 #define RGB565_BLACK     0x0000
 #define RGB565_YELLOW    0xFFE0
@@ -76,6 +90,53 @@ static void lcd_write_command_data(client spi_master_if spi,
     spi.end_transaction(0);
 }
 
+#if APP_XUH_MSC_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
+static void lcd_write_command_bytes(client spi_master_if spi,
+                                    unsigned command,
+                                    const uint8_t data[], unsigned count)
+{
+    spi.begin_transaction(0, LCD_SPI_KHZ, SPI_MODE_0);
+    lcd_command(spi, command);
+    for (unsigned i = 0; i < count; ++i)
+        lcd_data(spi, data[i]);
+    spi.end_transaction(0);
+}
+
+static void lcd_init_ili9341(client spi_master_if spi)
+{
+    const uint8_t vcom[] = {0x3E, 0x28};
+    const uint8_t frame_rate[] = {0x00, 0x18};
+    const uint8_t display_function[] = {0x08, 0x82, 0x27};
+
+    /* Set panel power, VCOM and scan timing while the display is asleep. */
+    lcd_write_command_data(spi, ILI9341_PWCTR1, 0x23);
+    lcd_write_command_data(spi, ILI9341_PWCTR2, 0x10);
+    lcd_write_command_bytes(spi, ILI9341_VMCTR1, vcom, sizeof(vcom));
+    lcd_write_command_data(spi, ILI9341_VMCTR2, 0x86);
+    lcd_write_command_bytes(spi, ILI9341_FRMCTR1, frame_rate, sizeof(frame_rate));
+    lcd_write_command_bytes(spi, ILI9341_DFUNCTR, display_function,
+                            sizeof(display_function));
+    lcd_write_command_data(spi, LCD_COLMOD, 0x55); /* 16-bit RGB565. */
+    /* MV | BGR: 320 x 240 landscape, matching the panel's colour order. */
+    lcd_write_command_data(spi, LCD_MADCTL, ILI9341_MADCTL_LANDSCAPE);
+    lcd_write_command(spi, LCD_INVOFF);
+
+    lcd_write_command(spi, LCD_SLPOUT);
+    delay_milliseconds(120);
+}
+#elif APP_XUH_MSC_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
+static void lcd_init_st7789v(client spi_master_if spi)
+{
+    /* Preserve the original ST7789V command order and settings. */
+    lcd_write_command(spi, LCD_SLPOUT);
+    delay_milliseconds(120);
+
+    lcd_write_command_data(spi, LCD_COLMOD, 0x55); /* 16-bit RGB565. */
+    lcd_write_command_data(spi, LCD_MADCTL, ST7789V_MADCTL_LANDSCAPE);
+    lcd_write_command(spi, LCD_INVON);
+}
+#endif
+
 static void lcd_reset(void)
 {
     p_lcd_dc <: 0;
@@ -90,15 +151,14 @@ static void lcd_init(client spi_master_if spi)
 {
     lcd_reset();
 
-    lcd_write_command(spi, ST7789_SWRESET);
+    lcd_write_command(spi, LCD_SWRESET);
     delay_milliseconds(150);
-    lcd_write_command(spi, ST7789_SLPOUT);
-    delay_milliseconds(120);
-
-    lcd_write_command_data(spi, ST7789_COLMOD, 0x55); /* 16-bit RGB565. */
-    lcd_write_command_data(spi, ST7789_MADCTL, 0x60);
-    lcd_write_command(spi, ST7789_INVON);
-    lcd_write_command(spi, ST7789_DISPON);
+#if APP_XUH_MSC_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
+    lcd_init_ili9341(spi);
+#elif APP_XUH_MSC_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
+    lcd_init_st7789v(spi);
+#endif
+    lcd_write_command(spi, LCD_DISPON);
     delay_milliseconds(20);
 }
 
@@ -106,13 +166,13 @@ static void lcd_set_address_window(client spi_master_if spi,
                                    unsigned x0, unsigned y0,
                                    unsigned x1, unsigned y1)
 {
-    lcd_command(spi, ST7789_CASET);
+    lcd_command(spi, LCD_CASET);
     lcd_data16(spi, x0);
     lcd_data16(spi, x1);
-    lcd_command(spi, ST7789_RASET);
+    lcd_command(spi, LCD_RASET);
     lcd_data16(spi, y0);
     lcd_data16(spi, y1);
-    lcd_command(spi, ST7789_RAMWR);
+    lcd_command(spi, LCD_RAMWR);
 }
 
 static void lcd_begin_window(client spi_master_if spi,
@@ -275,13 +335,16 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 }
 #endif
 
-void lcd_st7789v_task(client spi_master_if spi, chanend c_image)
+void lcd_display_task(client spi_master_if spi, chanend c_image)
 {
 #if APP_XUH_MSC_LCD_TEST_MODE
     unsigned x = 0;
     int direction = 1;
 #endif
 
+    /* Report the build-selected controller once, outside the rendering loop. */
+    printf("LCD: %s, %dx%d landscape, SPI %d kHz\n",
+           LCD_CONTROLLER_NAME, LCD_WIDTH, LCD_HEIGHT, LCD_SPI_KHZ);
     lcd_init(spi);
     lcd_fill_screen(spi, RGB565_BLACK);
 

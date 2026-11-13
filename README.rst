@@ -43,16 +43,21 @@ video elementary streams. Both run as fast as possible and report completed-play
 metrics through xSCOPE. Build commands, pipeline details and test limitations are
 in `the display pipeline guide <examples/app_xuh_msc/doc/rst/pipeline.rst>`_.
 
-ST7789V display
-===============
+ILI9341 / ST7789V display
+=========================
 
-The XU316 mass storage example displays the decoded JPEG on an ST7789V 240 by
-320 LCD. RGB888 image data is streamed from tile 1 to the tile 0 LCD task and
-converted into a tile 0 RGB565 framebuffer. Images smaller than the display are
-centred with black borders. Larger images are centre-cropped to 240 by 320. The
-complete framebuffer is assembled before the SPI transaction starts, and chip
-select remains asserted from the address-window commands through all pixel data
-for each update.
+The XU316 mass storage example supports ILI9341 and ST7789V 240 by 320 LCDs,
+used in 320 by 240 landscape orientation. ILI9341 is the default. Select the
+original display with ``-DAPP_XUH_MSC_LCD_CONTROLLER=ST7789V`` when configuring
+CMake, or select the new display explicitly with
+``-DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341``. The controller choice applies to both
+the ``jpeg`` and ``mpeg1`` build configurations.
+
+RGB888 image data is streamed from tile 1 to the tile 0 LCD task and converted
+into tile 0 RGB565 framebuffers. Images smaller than the display are centred
+with black borders. The complete framebuffer is assembled before the SPI
+transaction starts, and chip select remains asserted from the address-window
+commands through all pixel data for each update.
 
 Set ``APP_XUH_MSC_ENABLE_LCD=OFF`` when configuring with CMake to disable the
 display. Set ``APP_XUH_MSC_LCD_TEST_MODE=ON`` to replace JPEG rendering with a
@@ -61,7 +66,7 @@ covering the old and new box positions.
 
 The LCD is connected to tile 0 using the following ports and device pins:
 
-.. list-table:: ST7789V connections
+.. list-table:: ILI9341 / ST7789V connections (unchanged between controllers)
    :header-rows: 1
    :widths: 15 15 20 15
 

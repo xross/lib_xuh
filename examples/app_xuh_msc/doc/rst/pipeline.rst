@@ -20,6 +20,27 @@ the old single-config app image::
     xrun --xscope --xscope-io-only build-video/bin/jpeg/app_xuh_msc_jpeg.xe
     xrun --xscope --xscope-io-only build-video/bin/mpeg1/app_xuh_msc_mpeg1.xe
 
+ILI9341 is the default LCD controller. Both controllers use the same pins and
+320 x 240 landscape RGB565 output. To retain a separate ST7789V build::
+
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc -B build-video-st7789v \
+      -DAPP_XUH_MSC_LCD_CONTROLLER=ST7789V
+    xmake -C build-video-st7789v -j 8
+
+Use ``-DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341`` to select the new panel explicitly.
+The controller selection is independent of the ``jpeg`` / ``mpeg1`` decoder
+configuration. For initial panel bring-up, add
+``-DAPP_XUH_MSC_LCD_TEST_MODE=ON`` in a separate build directory and build
+``jpeg`` to run the moving-box test without decoding video.
+
+At startup the LCD task reports the build-selected controller once alongside
+the other xSCOPE debug output, for example::
+
+    LCD: ILI9341, 320x240 landscape, SPI 30000 kHz
+
+ST7789V builds report ``ST7789V`` instead. This is the configured controller,
+not a hardware-detected model; the LCD connection does not use MISO.
+
 Both programs run indefinitely while playback is successful. Stop xrun with
 Ctrl-C after collecting completed-play reports. Always use xSCOPE, not JTAG
 ``--io`` logging, which can halt the timing-sensitive USB task.
@@ -48,10 +69,11 @@ Input and display
 
 Use baseline JPEG frames at 320 x 240 with a maximum compressed frame size of
 30 KiB. Smaller images are centred; larger decoded images must fit the output
-buffer or decoding fails. The decoder uses full scale. The ST7789V is configured
-for 320 x 240 landscape addressing (MADCTL 0x60); view the display rotated 90
-degrees from its portrait orientation. Verify rotation and colour order on the
-physical panel.
+buffer or decoding fails. The decoder uses full scale. Both controllers use
+320 x 240 landscape addressing: ILI9341 uses MADCTL 0x28 with inversion off;
+ST7789V retains MADCTL 0x60 with inversion on. View the display rotated 90 degrees
+from its portrait orientation. Verify rotation and colour order on the physical
+panel; panel-specific wiring can affect these settings.
 
 Example conversion and preview on a Mac with FFmpeg installed::
 

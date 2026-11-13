@@ -12,7 +12,7 @@
 
 #if APP_XUH_MSC_ENABLE_LCD
 #include <spi.h>
-#include "lcd_st7789v.h"
+#include "lcd_display.h"
 
 on tile[0]: out buffered port:32 p_lcd_sclk = XS1_PORT_1L;
 on tile[0]: out buffered port:32 p_lcd_mosi = XS1_PORT_1M;
@@ -68,15 +68,15 @@ void main()
                                null, p_lcd_cs, 1, lcd_spi_clock);
 #if MSC_JPEG_PIPELINE
         on tile[0]: jpeg_pipeline_receive(c_lcd_image, c_lcd_render);
-        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_render);
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_render);
         on tile[1]: jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
         on tile[1]: jpeg_pipeline_transmit(c_jpeg_output, c_lcd_image);
 #elif MSC_MPEG_PIPELINE
         on tile[0]: mpeg_pipeline_receive(c_lcd_image, c_lcd_render);
-        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_render);
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_render);
         on tile[1]: mpeg_pipeline_decode(c_mpeg_load, c_lcd_image);
 #else
-        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_image);
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_image);
 #endif
 #endif
 
