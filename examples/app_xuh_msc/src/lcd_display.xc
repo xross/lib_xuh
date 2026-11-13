@@ -13,7 +13,7 @@
 
 #define LCD_WIDTH        320
 #define LCD_HEIGHT       240
-#define LCD_SPI_KHZ      30000
+#define LCD_SPI_KHZ      50000
 #define BOX_SIZE         32
 #define BOX_UPDATE_WIDTH (BOX_SIZE + 1)
 #define BOX_Y            ((LCD_HEIGHT - BOX_SIZE) / 2)

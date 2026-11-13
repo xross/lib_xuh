@@ -36,7 +36,7 @@ configuration. For initial panel bring-up, add
 At startup the LCD task reports the build-selected controller once alongside
 the other xSCOPE debug output, for example::
 
-    LCD: ILI9341, 320x240 landscape, SPI 30000 kHz
+    LCD: ILI9341, 320x240 landscape, SPI 50000 kHz
 
 ST7789V builds report ``ST7789V`` instead. This is the configured controller,
 not a hardware-detected model; the LCD connection does not use MISO.
@@ -451,7 +451,7 @@ In that historical build, decode was about two thirds of the 54.9 ms frame
 period and was the limiting stage.
 The decoder shares tile 1 with only the USB manager and FatFs tasks, so it
 already has a full logical core. The LCD write is at the wire rate for the
-30 MHz SPI clock and would limit playback at about 24 FPS. These figures are for
+30 MHz SPI clock then in use and would limit playback at about 24 FPS. These figures are for
 one file on one board; other content will decode at different rates.
 
 The first integrated XTC 15.3.1 build reports 321844 bytes on tile 0 and
@@ -738,6 +738,71 @@ comparison with pristine upstream. The standalone xcore macroblock test passes
 2128 independent per-pixel comparisons covering both block sizes, alignments,
 half-pixel modes and bidirectional rounding. The delayed-renderer hardware
 pipeline fixture also passes with the modified decoder and native RGB565 hashes.
+
+LCD SPI clock
+~~~~~~~~~~~~~
+
+The measurements above used a 30 MHz SPI clock, at which the 41.9 ms LCD write
+capped playback at about 23.9 FPS. The clock is now **50 MHz** (``LCD_SPI_KHZ``
+in ``src/lcd_display.xc``). ``lib_spi`` rounds a request down to the system
+clock divided by a multiple of four, so with a 600 MHz system clock the steps
+above 30 MHz are 37.5 MHz and 50 MHz.
+
+Each setting completed two 3025-frame plays of the reference file on the
+ILI9341 panel with zero errors, and the picture was checked by eye. Only the
+clock changed between the builds.
+
+.. list-table:: LCD SPI clock, second-play means (ms per displayed frame)
+   :header-rows: 1
+
+   * - Stage
+     - Tile
+     - 30 MHz
+     - 37.5 MHz
+     - 50 MHz
+   * - Wait for loader
+     - 1
+     - 1.269
+     - 1.266
+     - 1.265
+   * - Decode
+     - 1
+     - 29.344
+     - 29.767
+     - 29.767
+   * - Total transmit / acknowledgement wait
+     - 1 to 0 (timed on 1)
+     - 14.029
+     - 10.354
+     - 8.534
+   * - YUV to RGB565
+     - 0
+     - 5.761
+     - 5.771
+     - 5.763
+   * - Wait previous LCD
+     - 0
+     - 20.094
+     - 8.227
+     - 2.734
+   * - LCD SPI
+     - 0
+     - 41.859
+     - 33.665
+     - 25.471
+   * - FPS
+     -
+     - 22.33
+     - 24.08
+     - 25.19
+
+At 50 MHz the LCD write no longer limits playback: the decoder task's wait for
+the loader, feed, decode and handoff add up to the whole 39.7 ms frame period.
+The average is just above the file's 25 FPS. Pictures differ in decode time, so
+the on-screen rate, measured over half-second windows, still falls below 25 at
+times. The 30 MHz column is the earlier run recorded above; the 0.4 ms decode
+difference from it has not been investigated. ST7789V has not been run at this
+clock.
 
 Sampled decoder profiling
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -95,7 +95,7 @@ The LCD is connected to tile 0 using the following ports and device pins:
      - ``XS1_PORT_1P``
      - ``X0D39``
 
-MISO is not used. The display uses SPI mode 0 at 30 MHz. Connect the LCD and
+MISO is not used. The display uses SPI mode 0 at 50 MHz. Connect the LCD and
 XU316 grounds together and consult the XK-EVK-XU316-AIV carrier schematic for
 the physical connector positions of the listed device pins.
 
