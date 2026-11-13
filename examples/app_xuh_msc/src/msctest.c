@@ -31,6 +31,10 @@ unsigned int get_time(void);
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
+/* High-speed bulk packet size, which is also the only supported sector size.
+ * One READ(10) covers at most MSC_MAX_READ_SECTORS sectors. */
+enum { MSC_PACKET_BYTES = 512, MSC_MAX_READ_SECTORS = 64 };
+
 XUH_Ep g_ep_out2;
 XUH_Ep g_ep_in1;
 XUH_Ep g_ep_in0;
@@ -76,7 +80,8 @@ int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
 
     *dataResidue = 0;
     *status = -1;
-    if (cblen == 0 || cblen > 16 || length > 512 || (!dir && length))
+    if (cblen == 0 || cblen > 16 || length > MSC_MAX_READ_SECTORS * MSC_PACKET_BYTES ||
+        (!dir && length))
         return -1;
 
     /* Signature */
@@ -128,7 +133,17 @@ int ms_transport(XUH_Ep ep_out, XUH_Ep ep_in,
     {
         if (g_msc_trace)
             printf("MSC tag=%u: waiting for data\n", tag);
-        received = XUH_InTransfer(ep_in, data);
+        /* The data stage is one packet per IN transfer. Full packets are
+         * received straight into consecutive positions of the caller's
+         * buffer; a short packet, or the expected length, ends the stage.
+         * `data` must be word aligned and hold `length` rounded up to a
+         * whole packet. */
+        while ((unsigned)received < length) {
+            int packet = XUH_InTransfer(ep_in, data + received);
+            if (packet < 0 || packet > MSC_PACKET_BYTES) { received = -1; break; }
+            received += packet;
+            if (packet < MSC_PACKET_BYTES) break;
+        }
         if (g_msc_trace)
             printf("MSC tag=%u: data bytes=%d\n", tag, received);
     }
@@ -225,10 +240,13 @@ int ms_inquiry(XUH_Ep ep_out, XUH_Ep ep_in, int lun, int *deviceType, int *remov
   return status;
 }
 
-int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, unsigned lba, unsigned char buff[])
+/* READ(10) of `count` consecutive sectors (1..MSC_MAX_READ_SECTORS) as one
+ * command, rather than a command, data and status stage for every sector. */
+int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, unsigned lba, unsigned count, unsigned char buff[])
 {
 
-    char cb[10] = {0x28, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+    char cb[10] = {0x28, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    unsigned length = count * MSC_PACKET_BYTES;
     int residue, status;
     int retval;
 
@@ -236,10 +254,13 @@ int ms_read(XUH_Ep ep_out, XUH_Ep ep_in, int lun, unsigned lba, unsigned char bu
     cb[3] = (lba >> 16) & 0xFF;
     cb[4] = (lba >> 8) & 0xFF;
     cb[5] = (lba >> 0) & 0xFF;
+    cb[7] = (count >> 8) & 0xFF;
+    cb[8] = (count >> 0) & 0xFF;
 
-    retval = ms_transport(ep_out, ep_in, 512, 1, lun, 10, cb, buff, &residue, &status);
+    if (!count || count > MSC_MAX_READ_SECTORS) return -1;
+    retval = ms_transport(ep_out, ep_in, length, 1, lun, 10, cb, buff, &residue, &status);
 
-    return retval == 512 && residue == 0 ? status : -1;
+    return retval == (int)length && residue == 0 ? status : -1;
 }
 
 unsigned g_capacity;
@@ -287,10 +308,10 @@ int XUH_MSDSCSIMediaInitialise()
     return 0;
 }
 
-int XUH_MSDSCSISectorRead(unsigned sector, unsigned char buff[])
+int XUH_MSDSCSISectorRead(unsigned sector, unsigned count, unsigned char buff[])
 {
     /* Issues READ 10 command block */
-    return ms_read(g_ep_out2, g_ep_in1, 0, sector, buff);
+    return ms_read(g_ep_out2, g_ep_in1, 0, sector, count, buff);
 }
 
 
@@ -331,14 +352,16 @@ DRESULT disk_read (
         printstr("ifNum out of Range");
         return RES_PARERR;
     }
-    for(nSector = 0; nSector < count; nSector++)
+    while (count)
     {
-        if (XUH_MSDSCSISectorRead(sector, buff))
+        nSector = count < MSC_MAX_READ_SECTORS ? count : MSC_MAX_READ_SECTORS;
+        if (XUH_MSDSCSISectorRead(sector, nSector, buff))
         {
             return RES_ERROR;
         }
-        sector++;
-        buff += 512;
+        sector += nSector;
+        buff += nSector * MSC_PACKET_BYTES;
+        count -= nSector;
     }
     return RES_OK;
  }
