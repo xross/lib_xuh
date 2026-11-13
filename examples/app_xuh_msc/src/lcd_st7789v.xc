@@ -7,6 +7,7 @@
 
 #include "lcd_st7789v.h"
 #include "jpeg_pipeline.h"
+#include "mpeg_pipeline.h"
 
 #define LCD_WIDTH        320
 #define LCD_HEIGHT       240
@@ -174,7 +175,7 @@ static void lcd_move_box(client spi_master_if spi, unsigned old_x, unsigned new_
 }
 #endif
 
-#if !APP_XUH_MSC_LCD_TEST_MODE && !MSC_JPEG_PIPELINE
+#if !APP_XUH_MSC_LCD_TEST_MODE && !MSC_VIDEO_PIPELINE
 static uint8_t lcd_framebuffer[LCD_HEIGHT][LCD_WIDTH * 2];
 
 static uint16_t rgb888_to_rgb565(uint8_t red, uint8_t green, uint8_t blue)
@@ -224,7 +225,7 @@ static void lcd_render_image(client spi_master_if spi, chanend c_image)
 }
 #endif
 
-#if MSC_JPEG_PIPELINE
+#if MSC_VIDEO_PIPELINE
 static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 {
     unsigned expected = 0;
@@ -242,10 +243,18 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
         if (sequence != expected || slot != (sequence & 1)) __builtin_trap();
         ++expected;
         unsigned start, end;
+#if MSC_MPEG_PIPELINE
+        unsigned errors = mpeg_pipeline_check_lcd(slot);
+#else
         unsigned errors = jpeg_pipeline_check_lcd(slot);
+#endif
         profile_timer :> start;
         unsafe {
+#if MSC_MPEG_PIPELINE
+            unsigned char * unsafe buffer = mpeg_pipeline_lcd_buffer(slot);
+#else
             unsigned char * unsafe buffer = jpeg_pipeline_lcd_buffer(slot);
+#endif
             lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
             for (unsigned y = 0; y < LCD_HEIGHT; ++y)
                 spi.transfer_array((const uint8_t *)(buffer + y * LCD_WIDTH * 2),
@@ -253,7 +262,11 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
             spi.end_transaction(0);
         }
         profile_timer :> end;
+#if MSC_MPEG_PIPELINE
+        errors += mpeg_pipeline_check_lcd(slot);
+#else
         errors += jpeg_pipeline_check_lcd(slot);
+#endif
         outuint(c_render, sequence);
         outuint(c_render, end - start);
         outuint(c_render, errors);
@@ -291,7 +304,7 @@ void lcd_st7789v_task(client spi_master_if spi, chanend c_image)
         lcd_move_box(spi, old_x, x);
         delay_milliseconds(FRAME_DELAY_MS);
     }
-#elif MSC_JPEG_PIPELINE
+#elif MSC_VIDEO_PIPELINE
     lcd_render_pipeline(spi, c_image);
 #else
     while (1)

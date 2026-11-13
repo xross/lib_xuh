@@ -14,3 +14,5 @@
 CMakeCache.txt
 **CMakeFiles**
 manifest.txt
+__pycache__/
+*.pyc

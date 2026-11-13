@@ -25,6 +25,7 @@ unsigned int get_time(void);
 
 #include "msc_support.h"
 #include "jpeg_pipeline.h"
+#include "mpeg_pipeline.h"
 #include "mjpeg_reader.h"
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
@@ -411,7 +412,7 @@ void opendie(FRESULT rc ) /* Stop with dying message */
 FATFS Fatfs;
 FIL   Fil;
 //BYTE  fatfsbuffer[1024];
-#if !MSC_JPEG_PIPELINE
+#if !MSC_VIDEO_PIPELINE
 BYTE Buff[512*60];      /* File read buffer */
 #endif
 #if APP_XUH_MSC_ENABLE_JPEG && !MSC_JPEG_PIPELINE
@@ -578,6 +579,77 @@ static void run_jpeg_pipeline(chanend c_load)
 }
 #endif
 
+#if MSC_MPEG_PIPELINE
+static int play_mpeg1(chanend c_load, unsigned play)
+{
+    FIL file;
+    unsigned request[2], stats[MPEG_STATS_WORDS], failed = 0;
+    unsigned long long load_us = 0, elapsed_ticks = 0, total_bytes = 0;
+    g_msc_trace = 0;
+    FRESULT open_rc = f_open(&file, "VIDEO.M1V", FA_READ);
+    printf("Play %u: VIDEO.M1V open: rc=%u\n", play, open_rc);
+    printf("Playing MPEG-1 at full speed, 320x240 landscape (no pacing or dropped frames)...\n");
+    unsigned start = get_reference_time(), previous = start;
+    unsigned begin[3] = {play, open_rc, 0};
+    pipeline_send(c_load, begin, 3);
+    for (;;) {
+        pipeline_receive(c_load, request, 2);
+        unsigned now = get_reference_time();
+        elapsed_ticks += (unsigned)(now - previous);
+        previous = now;
+        if (request[0] == MPEG_PLAY_COMPLETE) {
+            pipeline_receive(c_load, stats, MPEG_STATS_WORDS);
+            if (request[1] != stats[MPEG_DECODED_FRAMES]) failed = 1;
+            break;
+        }
+        if (request[0] != MPEG_REQUEST_INPUT || !request[1] || request[1] > MPEG_LOAD_BYTES)
+            __builtin_trap();
+        UINT bytes = 0;
+        FRESULT rc = open_rc;
+        unsigned load_start = get_reference_time();
+        if (!open_rc) rc = f_read(&file, mpeg_pipeline_input_buffer(), request[1], &bytes);
+        load_us += (get_reference_time() - load_start) / 100;
+        total_bytes += bytes;
+        if (rc) failed = 1;
+        /* On this regular file, a zero-length read declares EOF. Decoder drains
+         * reordered pictures before returning completion; buffers remain local. */
+        unsigned response[3] = {bytes, bytes == 0, rc};
+        pipeline_send(c_load, response, 3);
+    }
+    elapsed_ticks += (unsigned)(get_reference_time() - previous);
+    if (!open_rc) {
+        FRESULT rc = f_close(&file);
+        if (rc) { printf("VIDEO.M1V close: rc=%u\n", rc); failed = 1; }
+    }
+    unsigned frames = stats[PIPELINE_FRAMES];
+    printf("MPEG pipeline drained: decoded=%u displayed=%u errors=%u status=%d bytes=%llu\n",
+           stats[MPEG_DECODED_FRAMES], frames, stats[PIPELINE_ERRORS],
+           (int)stats[MPEG_DECODE_STATUS], total_bytes);
+    printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
+    if (failed || open_rc || stats[PIPELINE_ERRORS] || frames != stats[MPEG_DECODED_FRAMES] || !frames) {
+        printf("MPEG-1 playback failed\n");
+        return 1;
+    }
+    unsigned long long elapsed_ms = elapsed_ticks / 100000;
+    unsigned fps = elapsed_ticks ? (unsigned)((unsigned long long)frames *
+                   PIPELINE_TICKS_PER_SECOND * 100 / elapsed_ticks) : 0;
+    printf("Play %u complete: %u frames in %llu.%03u seconds: %u.%02u FPS\n",
+           play, frames, elapsed_ms / 1000, (unsigned)(elapsed_ms % 1000), fps / 100, fps % 100);
+    printf("Startup to first displayed frame: %u us\n", (stats[PIPELINE_FIRST_COMPLETE] - start) / 100);
+    printf("Average stage times (us): load=%u feed=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
+           (unsigned)(load_us / frames), stats[MPEG_FEED_US] / frames,
+           stats[PIPELINE_DECODE_TICKS] / frames, stats[PIPELINE_TRANSFER_TICKS] / frames,
+           stats[PIPELINE_CONVERT_TICKS] / frames, stats[PIPELINE_RENDER_TICKS] / frames);
+    return 0;
+}
+
+static void run_mpeg_pipeline(chanend c_load)
+{
+    for (unsigned play = 1; ; ++play)
+        if (play_mpeg1(c_load, play)) return;
+}
+#endif
+
 
 void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
 #if APP_XUH_MSC_ENABLE_LCD
@@ -639,6 +711,8 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
 
 #if MSC_JPEG_PIPELINE
     run_jpeg_pipeline(c_lcd_image);
+#elif MSC_MPEG_PIPELINE
+    run_mpeg_pipeline(c_lcd_image);
 #elif APP_XUH_MSC_ENABLE_JPEG
     const char * const jpeg_paths[JPEG_FILE_COUNT] = JPEG_FILE_PATHS;
     /* The reference timer runs at 100 MHz. Unsigned subtraction handles wrap. */

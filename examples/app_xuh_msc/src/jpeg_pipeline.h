@@ -3,7 +3,15 @@
 
 #include <xccompat.h>
 
+#ifndef APP_XUH_MSC_ENABLE_MPEG1
+#define APP_XUH_MSC_ENABLE_MPEG1 0
+#endif
+#if APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_JPEG
+#error Select one video decoder per build configuration
+#endif
 #define MSC_JPEG_PIPELINE (APP_XUH_MSC_ENABLE_JPEG && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
+#define MSC_MPEG_PIPELINE (APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
+#define MSC_VIDEO_PIPELINE (MSC_JPEG_PIPELINE || MSC_MPEG_PIPELINE)
 #define PIPELINE_STOP (~0u)
 #define PIPELINE_INPUT_BYTES (512 * 60)
 #define JPEG_INPUT_WIDTH 320
@@ -48,7 +56,10 @@ unsigned char * unsafe jpeg_pipeline_lcd_buffer(unsigned slot);
 #else
 unsigned char *jpeg_pipeline_lcd_buffer(unsigned slot);
 unsigned char *jpeg_pipeline_input_buffer(unsigned slot);
+#endif
+#endif
 
+#if MSC_VIDEO_PIPELINE && !defined(__XC__)
 #include <xs1.h>
 #include <xcore/chanend.h>
 
@@ -73,6 +84,5 @@ static inline void pipeline_receive(chanend c, unsigned *words, unsigned count)
     chanend_check_control_token(c, XS1_CT_END);
     asm volatile("" ::: "memory");
 }
-#endif
 #endif
 #endif

@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.21)
+include($ENV{XMOS_CMAKE_PATH}/xcommon.cmake)
+project(test_mpeg_pipeline)
+set(MPEG_PIPELINE_TEST_FRAMES 1 CACHE STRING "Short pipeline fixture size: 1 or 3 pictures")
+if(NOT MPEG_PIPELINE_TEST_FRAMES MATCHES "^(1|3)$")
+    message(FATAL_ERROR "MPEG_PIPELINE_TEST_FRAMES must be 1 or 3")
+endif()
+set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../../../)
+set(APP_HW_TARGET XK-EVK-XU316)
+set(APP_INCLUDES src ../../src)
+set(APP_C_SRCS src/test.c ../../src/mpeg_pipeline.c ../../src/yuv_rgb565.c)
+set(APP_XC_SRCS src/main.xc)
+set(APP_COMPILER_FLAGS -O3 -g -report -fxscope -mcmodel=large -mno-dual-issue
+    -DAPP_XUH_MSC_ENABLE_JPEG=0 -DAPP_XUH_MSC_ENABLE_MPEG1=1
+    -DAPP_XUH_MSC_ENABLE_LCD=1 -DAPP_XUH_MSC_LCD_TEST_MODE=0 -DPIPELINE_VERIFY=1
+    -DMPEG_PIPELINE_TEST_FRAMES=${MPEG_PIPELINE_TEST_FRAMES})
+include(${CMAKE_CURRENT_LIST_DIR}/../../../deps.cmake)
+set(APP_DEPENDENT_MODULES "${XUH_MPEG_DEPENDENCY}")
+set(MPEG_BACKEND pl_mpeg)
+set(APP_XSCOPE_SRCS ../../config.xscope)
+XMOS_REGISTER_APP()
+set_target_properties(${APP_BUILD_TARGETS} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -56,4 +56,31 @@ endif()
 
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
+set(APP_COMPILER_FLAGS_jpeg ${APP_COMPILER_FLAGS} -DAPP_XUH_MSC_ENABLE_MPEG1=0)
+if(APP_HW_TARGET MATCHES "XK-EVK-XU316" AND APP_XUH_MSC_ENABLE_LCD AND NOT APP_XUH_MSC_LCD_TEST_MODE)
+    set(MPEG_BACKEND pl_mpeg CACHE STRING "Backend for the MPEG-1 player")
+    if(NOT MPEG_BACKEND STREQUAL "pl_mpeg")
+        message(FATAL_ERROR "The mpeg1 configuration requires MPEG_BACKEND=pl_mpeg")
+    endif()
+    list(APPEND APP_DEPENDENT_MODULES "${XUH_MPEG_DEPENDENCY}")
+    set(APP_COMPILER_FLAGS_mpeg1 ${APP_COMPILER_FLAGS})
+    list(FILTER APP_COMPILER_FLAGS_mpeg1 EXCLUDE REGEX "^-DAPP_XUH_MSC_ENABLE_JPEG=")
+    list(APPEND APP_COMPILER_FLAGS_mpeg1 -DAPP_XUH_MSC_ENABLE_JPEG=0 -DAPP_XUH_MSC_ENABLE_MPEG1=1)
+endif()
+
 XMOS_REGISTER_APP()
+
+# XTC 15.3.1 resolves modules for all configurations together. Keep each
+# decoder's sources out of the other executable, not merely linker-discarded.
+foreach(target ${APP_BUILD_TARGETS})
+    get_target_property(sources ${target} SOURCES)
+    if(target STREQUAL "app_xuh_msc_jpeg")
+        list(FILTER sources EXCLUDE REGEX "/lib_mpeg/lib_mpeg/")
+        set(configuration jpeg)
+    else()
+        list(FILTER sources EXCLUDE REGEX "/lib_jpeg/lib_jpeg/")
+        set(configuration mpeg1)
+    endif()
+    set_property(TARGET ${target} PROPERTY SOURCES "${sources}")
+    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${configuration}")
+endforeach()

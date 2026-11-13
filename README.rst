@@ -37,6 +37,12 @@ target by default and can also be built for the original XS2 target by setting
 XS2 board enables USB switch GPIO control in the app; the XU316 target assumes
 VBUS is hardwired.
 
+The mass storage app has named ``jpeg`` and ``mpeg1`` build configurations on
+XU316. ``jpeg`` loops ``VIDEO.MJP``; ``mpeg1`` uses PL_MPEG to loop ``VIDEO.M1V``
+video elementary streams. Both run as fast as possible and report completed-play
+metrics through xSCOPE. Build commands, pipeline details and test limitations are
+in `the display pipeline guide <examples/app_xuh_msc/doc/rst/pipeline.rst>`_.
+
 ST7789V display
 ===============
 

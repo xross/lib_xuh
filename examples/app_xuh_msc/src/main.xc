@@ -8,6 +8,7 @@
 #include "xuh.h"
 #include "usbh.h"
 #include "jpeg_pipeline.h"
+#include "mpeg_pipeline.h"
 
 #if APP_XUH_MSC_ENABLE_LCD
 #include <spi.h>
@@ -52,6 +53,8 @@ void main()
 #endif
 #if MSC_JPEG_PIPELINE
     chan c_jpeg_load, c_jpeg_output, c_lcd_render;
+#elif MSC_MPEG_PIPELINE
+    chan c_mpeg_load, c_lcd_render;
 #endif
 
     /* Enable 5V, VBUS and select USB A socket in USB switch */
@@ -68,6 +71,10 @@ void main()
         on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_render);
         on tile[1]: jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
         on tile[1]: jpeg_pipeline_transmit(c_jpeg_output, c_lcd_image);
+#elif MSC_MPEG_PIPELINE
+        on tile[0]: mpeg_pipeline_receive(c_lcd_image, c_lcd_render);
+        on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_render);
+        on tile[1]: mpeg_pipeline_decode(c_mpeg_load, c_lcd_image);
 #else
         on tile[0]: lcd_st7789v_task(lcd_spi[0], c_lcd_image);
 #endif
@@ -95,6 +102,8 @@ void main()
 #if APP_XUH_MSC_ENABLE_LCD
 #if MSC_JPEG_PIPELINE
                     , c_jpeg_load
+#elif MSC_MPEG_PIPELINE
+                    , c_mpeg_load
 #else
                     , c_lcd_image
 #endif
