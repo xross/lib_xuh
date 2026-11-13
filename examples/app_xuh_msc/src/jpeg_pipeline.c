@@ -1,4 +1,5 @@
 #include "jpeg_pipeline.h"
+#include "video_loader.h"
 
 #if MSC_JPEG_PIPELINE
 #include <stdio.h>
@@ -36,7 +37,7 @@ unsigned jpeg_pipeline_check_lcd(unsigned slot)
 #endif
 }
 
-unsigned char *jpeg_pipeline_input_buffer(unsigned slot)
+VIDEO_SOURCE_BUFFER unsigned char *jpeg_pipeline_input_buffer(unsigned slot)
 {
     return jpeg_input[slot];
 }
@@ -97,11 +98,11 @@ static void decode_play(chanend c_load, chanend c_output)
     }
     unsigned stop[5] = {PIPELINE_STOP, 0, 0, 0, 0};
     pipeline_send(c_output, stop, 5);
-    unsigned stats[PIPELINE_STATS_WORDS];
+    unsigned stats[PIPELINE_LOADER_STATS_WORDS] = {0};
     pipeline_receive(c_output, stats, PIPELINE_STATS_WORDS);
     stats[PIPELINE_DECODE_TICKS] = decode_ticks;
     stats[PIPELINE_ERRORS] += errors;
-    pipeline_send(c_load, stats, PIPELINE_STATS_WORDS);
+    pipeline_send(c_load, stats, PIPELINE_LOADER_STATS_WORDS);
 }
 
 static void transmit_play(chanend c_decode, chanend c_image)

@@ -8,7 +8,7 @@ endif()
 set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../../../)
 set(APP_HW_TARGET XK-EVK-XU316)
 set(APP_INCLUDES src ../../src)
-set(APP_C_SRCS src/test.c ../../src/mpeg_pipeline.c ../../src/yuv_rgb565.c)
+set(APP_C_SRCS src/test.c ../../src/mpeg_pipeline.c ../../src/yuv_rgb565.c ../../src/video_loader.c)
 set(APP_XC_SRCS src/main.xc)
 set(APP_COMPILER_FLAGS -O3 -g -report -fxscope -mcmodel=large -mno-dual-issue
     -DAPP_XUH_MSC_ENABLE_JPEG=0 -DAPP_XUH_MSC_ENABLE_MPEG1=1

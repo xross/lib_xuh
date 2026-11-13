@@ -44,6 +44,9 @@ enum {
     PIPELINE_ERRORS,
     PIPELINE_STATS_WORDS
 };
+/* Statistics returned to the loader: the words above plus decoder-specific
+ * words (see mpeg_pipeline.h); a decoder without any sends zeros. */
+#define PIPELINE_LOADER_STATS_WORDS (PIPELINE_STATS_WORDS + 6)
 
 #if MSC_JPEG_PIPELINE
 void jpeg_pipeline_decode(chanend c_load, chanend c_output);

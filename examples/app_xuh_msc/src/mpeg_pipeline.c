@@ -1,4 +1,5 @@
 #include "mpeg_pipeline.h"
+#include "video_loader.h"
 
 #if MSC_MPEG_PIPELINE
 #include <stdint.h>
@@ -8,9 +9,10 @@
 #include "mpeg.h"
 #include "yuv_rgb565.h"
 
-/* Tile 1: one reusable filesystem input chunk, plus lib_mpeg's static arena.
+/* Tile 1: two filesystem input chunks (one being read ahead while the other is
+ * fed), plus lib_mpeg's static arena.
  * Tile 0: two RGB565 framebuffers and one two-row YUV strip. No RGB888 frame. */
-static unsigned char input[MPEG_LOAD_BYTES] __attribute__((aligned(4)));
+static unsigned char input[2][MPEG_LOAD_BYTES] __attribute__((aligned(4)));
 static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2] __attribute__((aligned(4)));
 static unsigned strip[PIPELINE_LCD_WIDTH * 3 / 4];
 typedef unsigned __attribute__((may_alias)) plane_word_t;
@@ -24,7 +26,7 @@ static unsigned hash_bytes(const unsigned char *data, unsigned count)
 }
 #endif
 
-unsigned char *mpeg_pipeline_input_buffer(void) { return input; }
+VIDEO_SOURCE_BUFFER unsigned char *mpeg_pipeline_input_buffer(unsigned slot) { return input[slot]; }
 unsigned char *mpeg_pipeline_lcd_buffer(unsigned slot) { return lcd_frames[slot]; }
 unsigned mpeg_pipeline_check_lcd(unsigned slot)
 {
@@ -79,13 +81,15 @@ static void send_frame(chanend c_image, const mpeg_frame_t *frame)
 void mpeg_pipeline_decode(chanend c_load, chanend c_image)
 {
     for (;;) {
-        unsigned begin[3], decoded = 0, decode_us = 0, feed_us = 0, transfer_us = 0;
+        unsigned decoded = 0, decode_us = 0, feed_us = 0, transfer_us = 0, wait_us = 0;
+        unsigned expected = 0, protocol_errors = 0, stopped = 0;
+        /* The chunk currently owned by the decoder and how much is still unfed. */
+        unsigned held = 0, held_sequence = 0, remaining = 0;
+        const unsigned char *chunk = NULL;
         unsigned stats[MPEG_STATS_WORDS] = {0};
-        pipeline_receive(c_load, begin, 3);
-        mpeg_result_t result = MPEG_ERROR;
-        int opened = !begin[1];
-        if (opened) result = mpeg_open();
-        while (opened && result >= 0) {
+        mpeg_result_t result = mpeg_open();
+        int opened = result >= 0;
+        while (result >= 0) {
             mpeg_frame_t frame;
             unsigned start = get_reference_time();
             result = mpeg_next(&frame);
@@ -99,18 +103,67 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 transfer_us += (get_reference_time() - start) / 100;
                 ++decoded;
             } else if (result == MPEG_NEED_INPUT) {
+                if (!remaining) {
+                    /* Input is requested only after end of input if the
+                     * decoder misbehaves; it should drain to MPEG_END. */
+                    if (stopped) { result = MPEG_ERROR; break; }
+                    unsigned ready[3];
+                    start = get_reference_time();
+                    /* Release the fully fed chunk only now. The loader reads
+                     * ahead before it collects this ack, so sending it any
+                     * earlier would block the decoder behind that read. */
+                    if (held) {
+                        unsigned ack[2] = {held_sequence, 0};
+                        pipeline_send(c_load, ack, 2);
+                        held = 0;
+                    }
+                    pipeline_receive(c_load, ready, 3);
+                    wait_us += (get_reference_time() - start) / 100;
+                    if (ready[0] == PIPELINE_STOP) {
+                        stopped = 1;
+                        if (ready[1]) { result = MPEG_ERROR; break; }
+                        result = mpeg_feed(NULL, 0, 1);
+                        continue;
+                    }
+                    held = 1;
+                    held_sequence = ready[1];
+                    if (ready[0] != (expected & 1) || ready[1] != expected ||
+                        !ready[2] || ready[2] > MPEG_LOAD_BYTES) {
+                        ++protocol_errors;
+                        result = MPEG_ERROR;
+                        break;
+                    }
+                    ++expected;
+                    chunk = input[ready[0]];
+                    remaining = ready[2];
+                }
+                /* A chunk larger than the free input space is fed in parts. */
                 unsigned space = mpeg_input_space();
                 if (!space) { result = MPEG_CAPACITY; break; }
-                unsigned request[2] = {MPEG_REQUEST_INPUT, space < MPEG_LOAD_BYTES ? space : MPEG_LOAD_BYTES};
-                unsigned response[3];
-                pipeline_send(c_load, request, 2);
-                pipeline_receive(c_load, response, 3);
-                if (response[2] || response[0] > request[1]) { result = MPEG_ERROR; break; }
+                unsigned count = remaining < space ? remaining : space;
                 start = get_reference_time();
-                result = mpeg_feed(input, response[0], response[1]);
+                result = mpeg_feed(chunk, count, 0);
                 feed_us += (get_reference_time() - start) / 100;
+                chunk += count;
+                remaining -= count;
             } else if (result == MPEG_END) {
                 break;
+            }
+        }
+        /* After a failure, release any held chunk and refuse further ones until
+         * the loader's stop arrives, so both sides finish the play in step. */
+        if (held) {
+            unsigned ack[2] = {held_sequence, 1};
+            pipeline_send(c_load, ack, 2);
+        }
+        while (!stopped) {
+            unsigned ready[3];
+            pipeline_receive(c_load, ready, 3);
+            if (ready[0] == PIPELINE_STOP) {
+                stopped = 1;
+            } else {
+                unsigned ack[2] = {ready[1], 1};
+                pipeline_send(c_load, ack, 2);
             }
         }
         unsigned stop[3] = {PIPELINE_STOP, 0, 0};
@@ -125,13 +178,13 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         }
         if (result != MPEG_END || !decoded || stats[MPEG_ARENA_LIVE] || stats[PIPELINE_FRAMES] != decoded)
             ++stats[PIPELINE_ERRORS];
+        stats[PIPELINE_ERRORS] += protocol_errors;
         stats[PIPELINE_DECODE_TICKS] = decode_us;
         stats[PIPELINE_TRANSFER_TICKS] = transfer_us;
         stats[MPEG_FEED_US] = feed_us;
+        stats[MPEG_INPUT_WAIT_US] = wait_us;
         stats[MPEG_DECODED_FRAMES] = decoded;
         stats[MPEG_DECODE_STATUS] = (unsigned)result;
-        unsigned complete[2] = {MPEG_PLAY_COMPLETE, decoded};
-        pipeline_send(c_load, complete, 2);
         pipeline_send(c_load, stats, MPEG_STATS_WORDS);
     }
 }

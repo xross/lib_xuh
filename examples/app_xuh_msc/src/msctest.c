@@ -27,6 +27,7 @@ unsigned int get_time(void);
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
 #include "mjpeg_reader.h"
+#include "video_loader.h"
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
@@ -492,83 +493,49 @@ static unsigned send_rgb888_to_lcd(chanend c_lcd_image, const BYTE *rgb,
 #endif
 
 #if MSC_JPEG_PIPELINE
-static int play_mjpeg(chanend c_load, unsigned play)
-{
-    static mjpeg_reader_t reader;
-    unsigned sent = 0, pending = 0, failed = 0;
-    unsigned long long load_us = 0, elapsed_ticks = 0;
-    unsigned ack[2];
-    g_msc_trace = 0;
-    memset(&reader, 0, sizeof(reader));
-    FRESULT open_rc = f_open(&reader.file, "VIDEO.MJP", FA_READ);
-    printf("Play %u: VIDEO.MJP open: rc=%u\n", play, open_rc);
-    if (open_rc) failed = 1;
-    printf("Playing raw MJPEG at full speed, 320x240 landscape...\n");
-    unsigned start = get_reference_time();
-    unsigned previous = start;
-    while (!failed) {
-        unsigned slot = sent & 1;
-        UINT bytes;
-        unsigned load_start = get_reference_time();
-        int frame_result = mjpeg_read_frame(&reader, jpeg_pipeline_input_buffer(slot),
-                                           PIPELINE_INPUT_BYTES, &bytes);
-        load_us += (get_reference_time() - load_start) / 100;
+/* FatFs-backed source for the shared loader: one unit is one JPEG frame. */
+static mjpeg_reader_t mjpeg_reader;
 
-        /* While the alternate buffer was being filled, the decoder consumed
-         * the previous input. It must release ownership before publication. */
-        if (pending) {
-            pipeline_receive(c_load, ack, 2);
-            pending = 0;
-            if (ack[0] != sent - 1 || ack[1]) failed = 1;
-        }
-        if (frame_result <= 0 || failed) {
-            if (frame_result < 0) {
-                printf("VIDEO.MJP: frame %u read/format/capacity error, disk rc=%u, bytes=%u\n",
-                       sent, reader.error, bytes);
-                failed = 1;
-            }
-            break;
-        }
-        unsigned ready[3] = {slot, sent, bytes};
-        pipeline_send(c_load, ready, 3);
-        ++sent;
-        pending = 1;
-        unsigned now = get_reference_time();
-        elapsed_ticks += (unsigned)(now - previous);
-        previous = now;
-    }
-    if (!open_rc) {
-        FRESULT close_rc = f_close(&reader.file);
-        if (close_rc) { printf("VIDEO.MJP close: rc=%u\n", close_rc); failed = 1; }
-    }
-    if (pending) {
-        pipeline_receive(c_load, ack, 2);
-        if (ack[0] != sent - 1 || ack[1]) failed = 1;
-    }
-    unsigned stop[3] = {PIPELINE_STOP, 0, 0};
-    pipeline_send(c_load, stop, 3);
-    unsigned stats[PIPELINE_STATS_WORDS];
-    pipeline_receive(c_load, stats, PIPELINE_STATS_WORDS);
-    elapsed_ticks += (unsigned)(get_reference_time() - previous);
-    unsigned frames = stats[PIPELINE_FRAMES];
+VIDEO_SOURCE_OPEN static int mjpeg_source_open(void *context)
+{
+    (void)context;
+    memset(&mjpeg_reader, 0, sizeof(mjpeg_reader));
+    return f_open(&mjpeg_reader.file, "VIDEO.MJP", FA_READ);
+}
+
+VIDEO_SOURCE_READ static int mjpeg_source_read(void *context, unsigned char *destination, unsigned capacity, unsigned *bytes)
+{
+    (void)context;
+    UINT size = 0;
+    int result = mjpeg_read_frame(&mjpeg_reader, destination, capacity, &size);
+    *bytes = size;
+    if (result < 0) printf("VIDEO.MJP: disk rc=%u\n", mjpeg_reader.error);
+    return result;
+}
+
+VIDEO_SOURCE_CLOSE static int mjpeg_source_close(void *context)
+{
+    (void)context;
+    return f_close(&mjpeg_reader.file);
+}
+
+static int play_mjpeg(chanend c_load, unsigned number)
+{
+    static const video_source_t source = {
+        "VIDEO.MJP", NULL, mjpeg_source_open, mjpeg_source_read, mjpeg_source_close,
+        jpeg_pipeline_input_buffer, PIPELINE_INPUT_BYTES };
+    static video_play_t play;
+    g_msc_trace = 0;
+    printf("Play %u: raw MJPEG at full speed, 320x240 landscape...\n", number);
+    video_loader_play(c_load, &source, &play);
+    unsigned frames = play.stats[PIPELINE_FRAMES];
     printf("Pipeline drained: loaded=%u displayed=%u sequence/ownership/integrity errors=%u\n",
-           sent, frames, stats[PIPELINE_ERRORS]);
-    if (failed || stats[PIPELINE_ERRORS] || frames != sent || !frames) {
+           play.units, frames, play.stats[PIPELINE_ERRORS]);
+    if (play.failed || play.stats[PIPELINE_ERRORS] || frames != play.units || !frames) {
         printf("MJPEG playback failed\n");
         return 1;
     }
-    unsigned long long elapsed_ms = elapsed_ticks / 100000;
-    unsigned fps = elapsed_ticks ? (unsigned)((unsigned long long)frames *
-                    PIPELINE_TICKS_PER_SECOND * 100 / elapsed_ticks) : 0;
-    printf("Play %u complete: %u frames in %llu.%03u seconds: %u.%02u FPS\n",
-           play, frames, elapsed_ms / 1000, (unsigned)(elapsed_ms % 1000), fps / 100, fps % 100);
-    printf("Startup to first displayed frame: %u us\n",
-           (stats[PIPELINE_FIRST_COMPLETE] - start) / 100);
-    printf("Average stage times (us): load=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
-           (unsigned)(load_us / frames), stats[PIPELINE_DECODE_TICKS] / frames,
-           stats[PIPELINE_TRANSFER_TICKS] / frames,
-           stats[PIPELINE_CONVERT_TICKS] / frames,
-           stats[PIPELINE_RENDER_TICKS] / frames);
+    video_loader_report(number, &play);
     return 0;
 }
 
@@ -580,66 +547,57 @@ static void run_jpeg_pipeline(chanend c_load)
 #endif
 
 #if MSC_MPEG_PIPELINE
-static int play_mpeg1(chanend c_load, unsigned play)
+/* FatFs-backed source for the shared loader: one unit is one stream chunk. */
+static FIL mpeg_file;
+static unsigned long long mpeg_bytes;
+
+VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
 {
-    FIL file;
-    unsigned request[2], stats[MPEG_STATS_WORDS], failed = 0;
-    unsigned long long load_us = 0, elapsed_ticks = 0, total_bytes = 0;
+    (void)context;
+    mpeg_bytes = 0;
+    return f_open(&mpeg_file, "VIDEO.M1V", FA_READ);
+}
+
+VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *destination, unsigned capacity, unsigned *bytes)
+{
+    (void)context;
+    UINT count = 0;
+    FRESULT rc = f_read(&mpeg_file, destination, capacity, &count);
+    *bytes = count;
+    mpeg_bytes += count;
+    if (rc) { printf("VIDEO.M1V: disk rc=%u\n", rc); return -1; }
+    /* On this regular file, a zero-length read is the end of the stream. */
+    return count ? 1 : 0;
+}
+
+VIDEO_SOURCE_CLOSE static int mpeg_source_close(void *context)
+{
+    (void)context;
+    return f_close(&mpeg_file);
+}
+
+static int play_mpeg1(chanend c_load, unsigned number)
+{
+    static const video_source_t source = {
+        "VIDEO.M1V", NULL, mpeg_source_open, mpeg_source_read, mpeg_source_close,
+        mpeg_pipeline_input_buffer, MPEG_LOAD_BYTES };
+    static video_play_t play;
     g_msc_trace = 0;
-    FRESULT open_rc = f_open(&file, "VIDEO.M1V", FA_READ);
-    printf("Play %u: VIDEO.M1V open: rc=%u\n", play, open_rc);
-    printf("Playing MPEG-1 at full speed, 320x240 landscape (no pacing or dropped frames)...\n");
-    unsigned start = get_reference_time(), previous = start;
-    unsigned begin[3] = {play, open_rc, 0};
-    pipeline_send(c_load, begin, 3);
-    for (;;) {
-        pipeline_receive(c_load, request, 2);
-        unsigned now = get_reference_time();
-        elapsed_ticks += (unsigned)(now - previous);
-        previous = now;
-        if (request[0] == MPEG_PLAY_COMPLETE) {
-            pipeline_receive(c_load, stats, MPEG_STATS_WORDS);
-            if (request[1] != stats[MPEG_DECODED_FRAMES]) failed = 1;
-            break;
-        }
-        if (request[0] != MPEG_REQUEST_INPUT || !request[1] || request[1] > MPEG_LOAD_BYTES)
-            __builtin_trap();
-        UINT bytes = 0;
-        FRESULT rc = open_rc;
-        unsigned load_start = get_reference_time();
-        if (!open_rc) rc = f_read(&file, mpeg_pipeline_input_buffer(), request[1], &bytes);
-        load_us += (get_reference_time() - load_start) / 100;
-        total_bytes += bytes;
-        if (rc) failed = 1;
-        /* On this regular file, a zero-length read declares EOF. Decoder drains
-         * reordered pictures before returning completion; buffers remain local. */
-        unsigned response[3] = {bytes, bytes == 0, rc};
-        pipeline_send(c_load, response, 3);
-    }
-    elapsed_ticks += (unsigned)(get_reference_time() - previous);
-    if (!open_rc) {
-        FRESULT rc = f_close(&file);
-        if (rc) { printf("VIDEO.M1V close: rc=%u\n", rc); failed = 1; }
-    }
+    printf("Play %u: MPEG-1 at full speed, 320x240 landscape (no pacing or dropped frames)...\n", number);
+    video_loader_play(c_load, &source, &play);
+    const unsigned *stats = play.stats;
     unsigned frames = stats[PIPELINE_FRAMES];
     printf("MPEG pipeline drained: decoded=%u displayed=%u errors=%u status=%d bytes=%llu\n",
            stats[MPEG_DECODED_FRAMES], frames, stats[PIPELINE_ERRORS],
-           (int)stats[MPEG_DECODE_STATUS], total_bytes);
+           (int)stats[MPEG_DECODE_STATUS], mpeg_bytes);
     printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
-    if (failed || open_rc || stats[PIPELINE_ERRORS] || frames != stats[MPEG_DECODED_FRAMES] || !frames) {
+    if (play.failed || stats[PIPELINE_ERRORS] || frames != stats[MPEG_DECODED_FRAMES] || !frames) {
         printf("MPEG-1 playback failed\n");
         return 1;
     }
-    unsigned long long elapsed_ms = elapsed_ticks / 100000;
-    unsigned fps = elapsed_ticks ? (unsigned)((unsigned long long)frames *
-                   PIPELINE_TICKS_PER_SECOND * 100 / elapsed_ticks) : 0;
-    printf("Play %u complete: %u frames in %llu.%03u seconds: %u.%02u FPS\n",
-           play, frames, elapsed_ms / 1000, (unsigned)(elapsed_ms % 1000), fps / 100, fps % 100);
-    printf("Startup to first displayed frame: %u us\n", (stats[PIPELINE_FIRST_COMPLETE] - start) / 100);
-    printf("Average stage times (us): load=%u feed=%u decode=%u transmit/wait=%u receive/convert=%u LCD SPI=%u\n",
-           (unsigned)(load_us / frames), stats[MPEG_FEED_US] / frames,
-           stats[PIPELINE_DECODE_TICKS] / frames, stats[PIPELINE_TRANSFER_TICKS] / frames,
-           stats[PIPELINE_CONVERT_TICKS] / frames, stats[PIPELINE_RENDER_TICKS] / frames);
+    video_loader_report(number, &play);
+    printf("MPEG decoder input (us per frame): feed=%u wait for loader=%u\n",
+           stats[MPEG_FEED_US] / frames, stats[MPEG_INPUT_WAIT_US] / frames);
     return 0;
 }
 

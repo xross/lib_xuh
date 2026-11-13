@@ -1,42 +1,67 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "mpeg_pipeline.h"
+#include "video_loader.h"
 
 #define CHECK(condition) do { if (!(condition)) { \
     printf("FAIL: %s:%u: %s\n", __FILE__, __LINE__, #condition); exit(1); } } while (0)
 
-/* Substitute only storage and LCD hardware. Exercise the actual decoder,
- * channels, tile-local buffers, colour conversion and repeated-play protocol. */
+/* Substitute only storage and LCD hardware. Exercise the actual shared loader,
+ * decoder, channels, tile-local buffers, colour conversion and repeated plays. */
+enum { CASE_GOOD, CASE_OPEN_FAILS, CASE_READ_FAILS, CASE_EMPTY };
+static FILE *file;
+static unsigned test_case;
+
+VIDEO_SOURCE_OPEN static int source_open(void *context)
+{
+    (void)context;
+    if (test_case == CASE_OPEN_FAILS) return 1;
+    file = fopen("VIDEO.M1V", "rb");
+    return file ? 0 : 1;
+}
+
+VIDEO_SOURCE_READ static int source_read(void *context, unsigned char *destination, unsigned capacity, unsigned *bytes)
+{
+    (void)context;
+    *bytes = 0;
+    if (test_case == CASE_READ_FAILS) return -1;
+    if (test_case == CASE_EMPTY) return 0;
+    *bytes = fread(destination, 1, capacity, file);
+    if (ferror(file)) return -1;
+    return *bytes ? 1 : 0;
+}
+
+VIDEO_SOURCE_CLOSE static int source_close(void *context)
+{
+    (void)context;
+    int rc = fclose(file);
+    file = NULL;
+    return rc;
+}
+
 void test_loader(chanend c_load)
 {
+    static const video_source_t source = {
+        "VIDEO.M1V", NULL, source_open, source_read, source_close,
+        mpeg_pipeline_input_buffer, MPEG_LOAD_BYTES };
+    static video_play_t play;
     setbuf(stdout, NULL);
-    for (unsigned play = 1; play <= 7; ++play) {
-        unsigned error_case = play >= 4 && play <= 6;
-        FILE *file = error_case ? NULL : fopen("VIDEO.M1V", "rb");
-        CHECK(error_case || file);
-        unsigned begin[3] = {play, play == 4, 0};
-        pipeline_send(c_load, begin, 3);
-        unsigned request[2], stats[MPEG_STATS_WORDS];
-        for (;;) {
-            pipeline_receive(c_load, request, 2);
-            if (request[0] == MPEG_PLAY_COMPLETE) break;
-            CHECK(request[0] == MPEG_REQUEST_INPUT && request[1] && request[1] <= MPEG_LOAD_BYTES);
-            unsigned bytes = error_case ? 0 : fread(mpeg_pipeline_input_buffer(), 1, request[1], file);
-            unsigned response[3] = {bytes, bytes == 0, play == 5};
-            CHECK(!file || !ferror(file));
-            pipeline_send(c_load, response, 3);
-        }
-        pipeline_receive(c_load, stats, MPEG_STATS_WORDS);
-        if (file) CHECK(!fclose(file));
+    for (unsigned number = 1; number <= 7; ++number) {
+        test_case = number == 4 ? CASE_OPEN_FAILS : number == 5 ? CASE_READ_FAILS :
+                    number == 6 ? CASE_EMPTY : CASE_GOOD;
+        video_loader_play(c_load, &source, &play);
+        const unsigned *stats = play.stats;
         CHECK(!stats[MPEG_ARENA_LIVE]);
-        if (error_case) {
+        if (test_case != CASE_GOOD) {
             CHECK(!stats[PIPELINE_FRAMES] && stats[PIPELINE_ERRORS]);
+            CHECK(test_case == CASE_EMPTY || play.failed);
         } else {
+            CHECK(!play.failed && play.units);
             CHECK(stats[PIPELINE_FRAMES] == MPEG_PIPELINE_TEST_FRAMES &&
                   stats[MPEG_DECODED_FRAMES] == MPEG_PIPELINE_TEST_FRAMES);
             CHECK(!stats[PIPELINE_ERRORS]);
         }
-        printf("PASS: pipeline play=%u frames=%u errors=%u live=%u\n", play,
+        printf("PASS: pipeline play=%u frames=%u errors=%u live=%u\n", number,
                stats[PIPELINE_FRAMES], stats[PIPELINE_ERRORS], stats[MPEG_ARENA_LIVE]);
     }
     puts("PASS: MPEG pipeline repeat, EOF drain, open/read/empty errors and recovery");
