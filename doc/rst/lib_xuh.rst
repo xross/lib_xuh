@@ -190,7 +190,7 @@ application ``xuh_conf.h``.
 Examples
 ********
 
-Both examples are for XK-EVK-XU316 with VBUS hardwired, and expect a high-speed
+The examples are for XK-EVK-XU316 with VBUS hardwired, and expect a high-speed
 USB mass storage device with a FAT volume. They use the XU316-only transport;
 the library's XS2 transport support is separate.
 
@@ -257,7 +257,7 @@ The XU316/LCD build provides three configurations:
      - ``VIDEO.M1V``
      - MPEG-1 elementary video, I/P/B pictures
    * - ``mpeg1_audio``
-     - ``VIDEO.MPG``
+     - ``VIDEO_320x180.MPG``
      - MPEG-1 program-stream video; decode and discard MP2 audio
 
 Each executable contains only its selected video decoder. Build one
@@ -293,12 +293,9 @@ benchmark configuration:
    * - ``APP_XUH_PLAYER_LCD_CONTROLLER``
      - ``ILI9341``
      - Select ``ILI9341`` or ``ST7789V``
-   * - ``APP_XUH_PLAYER_ENABLE_LCD``
-     - ``ON`` on XU316
-     - Enable display output
    * - ``APP_XUH_PLAYER_LCD_TEST_MODE``
      - ``OFF``
-     - Run a moving-box LCD test instead of JPEG playback
+     - Run a moving-box LCD test instead of video
    * - ``APP_XUH_PLAYER_FPS_OVERLAY``
      - ``ON``
      - Draw a smoothed measured-FPS gauge with the MPEG source-rate target
@@ -328,14 +325,15 @@ Library options are set in an application ``mpeg_conf.h``, for example
 cache options. See the ``lib_mpeg`` guide
 for arithmetic/accuracy differences and the MP2 options.
 
-For a named, smaller program stream on the USB stick, retain the audio/program-
-stream configuration and select its filename without renaming the file::
+The ``mpeg1_audio`` default is a 320 x 180 program stream. To play another
+program stream on the USB stick, such as the full-screen ``VIDEO.MPG``, select
+its filename without renaming the file::
 
-    cmake -G "Unix Makefiles" -S examples/app_xuh_player -B build-small-video \
-      -DAPP_XUH_PLAYER_MPEG_FILE=VIDEO_320x180.MPG
-    xmake -C build-small-video app_xuh_player_mpeg1_audio
+    cmake -G "Unix Makefiles" -S examples/app_xuh_player -B build-full-video \
+      -DAPP_XUH_PLAYER_MPEG_FILE=VIDEO.MPG
+    xmake -C build-full-video app_xuh_player_mpeg1_audio
     xrun --xscope --xscope-io-only \
-      build-small-video/bin/mpeg1_audio/app_xuh_player_mpeg1_audio.xe
+      build-full-video/bin/mpeg1_audio/app_xuh_player_mpeg1_audio.xe
 
 The filename selects the input, not its dimensions or format. The ``mpeg1``
 configuration still requires elementary video; ``mpeg1_audio`` demultiplexes MPG.
@@ -515,6 +513,10 @@ It includes frame/error counts, decoder status, bytes read, arena peak/cleanup,
 startup latency, FPS and per-stage means. There is no routine per-frame logging.
 Unsigned reference-timer deltas accumulate into a 64-bit play total; each
 individual interval must fit one 32-bit timer period (42.9 s at 100 MHz).
+
+Benchmark with a full-screen 320 x 240 picture. The ``mpeg1`` default is one;
+the ``mpeg1_audio`` default is the smaller 320 x 180 stream, so configure that
+build with ``-DAPP_XUH_PLAYER_MPEG_FILE=VIDEO.MPG`` when measuring.
 
 .. list-table:: Default MPEG-1 hardware workload
    :header-rows: 1

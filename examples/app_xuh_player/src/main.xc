@@ -10,7 +10,6 @@
 #include "activity_led.h"
 #include "audio_pipeline.h"
 
-#if APP_XUH_PLAYER_ENABLE_LCD
 #include <spi.h>
 #include "lcd_display.h"
 
@@ -20,7 +19,6 @@ on tile[0]: out port p_lcd_cs = XS1_PORT_1N;
 on tile[0]: out port p_lcd_dc = XS1_PORT_1O;
 on tile[0]: out port p_lcd_rst = XS1_PORT_1P;
 on tile[0]: clock lcd_spi_clock = XS1_CLKBLK_1;
-#endif
 
 #define NUM_EPS 3
 
@@ -31,12 +29,8 @@ void main()
 #endif
     chan xuhChans_out[NUM_EPS];
     chan xuhChans_in[NUM_EPS];
-#if APP_XUH_PLAYER_ENABLE_LCD
     interface spi_master_if lcd_spi[1];
-#endif
-#if APP_XUH_PLAYER_ENABLE_LCD
     chan c_lcd_image;
-#endif
 #if MSC_JPEG_PIPELINE
     chan c_jpeg_load, c_jpeg_output, c_lcd_render;
 #elif MSC_MPEG_PIPELINE
@@ -51,7 +45,6 @@ void main()
 #if APP_XUH_PLAYER_ACTIVITY_LED
         on tile[1]: activity_led_task();
 #endif
-#if APP_XUH_PLAYER_ENABLE_LCD
         on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
                                null, p_lcd_cs, 1, lcd_spi_clock);
 #if MSC_JPEG_PIPELINE
@@ -66,7 +59,6 @@ void main()
 #else
         on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_image);
 #endif
-#endif
 
 #ifndef DEBUG
         on tile[1]:
@@ -78,14 +70,12 @@ void main()
         on tile[1]:
         {
             USBHost(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS
-#if APP_XUH_PLAYER_ENABLE_LCD
 #if MSC_JPEG_PIPELINE
                     , c_jpeg_load
 #elif MSC_MPEG_PIPELINE
                     , c_mpeg_load
 #else
                     , c_lcd_image
-#endif
 #endif
 #if APP_XUH_PLAYER_MPEG_AUDIO
                     , c_audio

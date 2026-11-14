@@ -4,6 +4,11 @@ lib_xuh change log
 UNRELEASED
 ----------
 
+  * CHANGED: The player's ``mpeg1_audio`` configuration plays
+    ``VIDEO_320x180.MPG`` by default
+  * REMOVED: The player's ``TEST.TXT`` read and its JPEG decode benchmark, with
+    the single-image LCD path and BMP writer only they used, and the
+    ``APP_XUH_PLAYER_ENABLE_LCD`` option: the player always has a display
   * CHANGED: The player FPS gauge uses the MPEG sequence-header rate for its
     target tick; measured playback throughput remains separate
   * ADDED: Centred smaller MPEG pictures in the storage example, with a fixed

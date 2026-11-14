@@ -1,5 +1,3 @@
-#if APP_XUH_PLAYER_ENABLE_LCD
-
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -235,56 +233,6 @@ static void lcd_move_box(client spi_master_if spi, unsigned old_x, unsigned new_
 }
 #endif
 
-#if !APP_XUH_PLAYER_LCD_TEST_MODE && !MSC_VIDEO_PIPELINE
-static uint8_t lcd_framebuffer[LCD_HEIGHT][LCD_WIDTH * 2];
-
-static uint16_t rgb888_to_rgb565(uint8_t red, uint8_t green, uint8_t blue)
-{
-    return ((uint16_t)(red & 0xF8) << 8) |
-           ((uint16_t)(green & 0xFC) << 3) |
-           (blue >> 3);
-}
-
-static void lcd_render_image(client spi_master_if spi, chanend c_image)
-{
-    unsigned image_width = inuint(c_image);
-    unsigned image_height = inuint(c_image);
-    unsigned x_offset = (LCD_WIDTH - image_width) / 2;
-    unsigned y_offset = (LCD_HEIGHT - image_height) / 2;
-
-    memset(lcd_framebuffer, 0, sizeof(lcd_framebuffer));
-
-    for (unsigned y = 0; y < image_height; ++y) {
-        for (unsigned x = 0; x < image_width; ++x) {
-            uint8_t red = inuchar(c_image);
-            uint8_t green = inuchar(c_image);
-            uint8_t blue = inuchar(c_image);
-            uint16_t pixel = rgb888_to_rgb565(red, green, blue);
-            unsigned output_x = x_offset + x;
-            unsigned output_y = y_offset + y;
-
-            lcd_framebuffer[output_y][2 * output_x] = pixel >> 8;
-            lcd_framebuffer[output_y][2 * output_x + 1] = pixel;
-        }
-    }
-
-    chkct(c_image, XS1_CT_END);
-
-    timer profile_timer;
-    unsigned start, end;
-    profile_timer :> start;
-    lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
-    for (unsigned y = 0; y < LCD_HEIGHT; ++y)
-        spi.transfer_array(lcd_framebuffer[y], null, LCD_WIDTH * 2);
-
-    spi.end_transaction(0);
-    profile_timer :> end;
-    /* Acknowledge completion and close the return route too. */
-    outuint(c_image, end - start);
-    outct(c_image, XS1_CT_END);
-}
-#endif
-
 #if MSC_VIDEO_PIPELINE
 /* lib_spi's synchronous array length is a compile-time parameter. Preserve
  * the single-call full-width path; other MPEG widths are multiples of eight. */
@@ -412,10 +360,5 @@ void lcd_display_task(client spi_master_if spi, chanend c_image)
     }
 #elif MSC_VIDEO_PIPELINE
     lcd_render_pipeline(spi, c_image);
-#else
-    while (1)
-        lcd_render_image(spi, c_image);
 #endif
 }
-
-#endif

@@ -19,9 +19,9 @@ add_executable(activity_led_test activity_led_test.c ../src/activity_led.c)
 add_executable(mjpeg_reader_test mjpeg_reader_test.c ../src/mjpeg_reader.c)
 target_include_directories(mjpeg_reader_test PRIVATE "${FATFS_ROOT}/lib_fatfs/api")
 target_compile_definitions(fps_overlay_test PRIVATE APP_XUH_PLAYER_ENABLE_JPEG=0
-    APP_XUH_PLAYER_ENABLE_MPEG1=1 APP_XUH_PLAYER_ENABLE_LCD=1)
+    APP_XUH_PLAYER_ENABLE_MPEG1=1)
 target_compile_definitions(video_window_test PRIVATE APP_XUH_PLAYER_ENABLE_JPEG=0
-    APP_XUH_PLAYER_ENABLE_MPEG1=1 APP_XUH_PLAYER_ENABLE_LCD=1)
+    APP_XUH_PLAYER_ENABLE_MPEG1=1)
 foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test frame_timing_test activity_led_test mjpeg_reader_test)
     target_include_directories(${target} PRIVATE ../src)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)

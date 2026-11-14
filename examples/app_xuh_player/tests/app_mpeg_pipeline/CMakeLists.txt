@@ -12,7 +12,7 @@ set(APP_C_SRCS src/test.c ../../src/mpeg_pipeline.c ../../src/video_loader.c)
 set(APP_XC_SRCS src/main.xc)
 set(APP_COMPILER_FLAGS -O3 -g -report -fxscope -mcmodel=large -mno-dual-issue
     -DAPP_XUH_PLAYER_ENABLE_JPEG=0 -DAPP_XUH_PLAYER_ENABLE_MPEG1=1
-    -DAPP_XUH_PLAYER_ENABLE_LCD=1 -DAPP_XUH_PLAYER_LCD_TEST_MODE=0 -DPIPELINE_VERIFY=1 -DAPP_XUH_PLAYER_FPS_OVERLAY=0
+    -DAPP_XUH_PLAYER_LCD_TEST_MODE=0 -DPIPELINE_VERIFY=1 -DAPP_XUH_PLAYER_FPS_OVERLAY=0
     -DMPEG_PIPELINE_TEST_FRAMES=${MPEG_PIPELINE_TEST_FRAMES})
 set(APP_COMPILER_FLAGS_mpeg_pipeline.c -mdual-issue)
 include(${CMAKE_CURRENT_LIST_DIR}/../../../deps.cmake)

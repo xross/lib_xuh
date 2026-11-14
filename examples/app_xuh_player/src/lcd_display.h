@@ -1,8 +1,6 @@
 #ifndef LCD_DISPLAY_H_
 #define LCD_DISPLAY_H_
 
-#if APP_XUH_PLAYER_ENABLE_LCD
-
 #define LCD_CONTROLLER_ILI9341 1
 #define LCD_CONTROLLER_ST7789V 2
 
@@ -19,7 +17,5 @@
 #include <spi.h>
 
 void lcd_display_task(client spi_master_if spi, chanend c_image);
-
-#endif
 
 #endif

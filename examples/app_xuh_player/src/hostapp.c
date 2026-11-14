@@ -5,17 +5,10 @@
 #include "activity_led.h"
 #include "hostapp.h"
 
-/* In msctest.c: mount the volume and play from it. */
-void MassStorageApp(
-#if APP_XUH_PLAYER_ENABLE_LCD
-                    chanend c_lcd_image
+/* In player.c: mount the volume and play from it. */
+void MassStorageApp(chanend c_load
 #if APP_XUH_PLAYER_MPEG_AUDIO
                     , chanend c_audio
-#endif
-#elif APP_XUH_PLAYER_MPEG_AUDIO
-                    chanend c_audio
-#else
-                    void
 #endif
                     );
 
@@ -27,10 +20,8 @@ XUH_ACTIVITY_CALLBACK static void usb_activity(XUH_Activity activity)
                                                       ACTIVITY_LED_BUSY);
 }
 
-void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in
-#if APP_XUH_PLAYER_ENABLE_LCD
-             , chanend c_lcd_image
-#endif
+void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in,
+             chanend c_load
 #if APP_XUH_PLAYER_MPEG_AUDIO
              , chanend c_audio
 #endif
@@ -57,14 +48,9 @@ void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in
             /* A mass storage device: it is now FatFs drive 0. */
             printf("USB: mass storage, %u blocks of %u bytes\n",
                    (unsigned)msc.blockCount, (unsigned)msc.blockSize);
-            MassStorageApp(
-#if APP_XUH_PLAYER_ENABLE_LCD
-                           c_lcd_image
+            MassStorageApp(c_load
 #if APP_XUH_PLAYER_MPEG_AUDIO
                            , c_audio
-#endif
-#elif APP_XUH_PLAYER_MPEG_AUDIO
-                           c_audio
 #endif
                            );
         } else if (status == XUH_ERR_UNSUPPORTED) {
