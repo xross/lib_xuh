@@ -1,0 +1,96 @@
+#include <xs1.h>
+#include <platform.h>
+#include <stdio.h>
+#include <print.h>
+
+#include "xuh.h"
+#include "hostapp.h"
+#include "jpeg_pipeline.h"
+#include "mpeg_pipeline.h"
+#include "activity_led.h"
+#include "audio_pipeline.h"
+
+#if APP_XUH_PLAYER_ENABLE_LCD
+#include <spi.h>
+#include "lcd_display.h"
+
+on tile[0]: out buffered port:32 p_lcd_sclk = XS1_PORT_1L;
+on tile[0]: out buffered port:32 p_lcd_mosi = XS1_PORT_1M;
+on tile[0]: out port p_lcd_cs = XS1_PORT_1N;
+on tile[0]: out port p_lcd_dc = XS1_PORT_1O;
+on tile[0]: out port p_lcd_rst = XS1_PORT_1P;
+on tile[0]: clock lcd_spi_clock = XS1_CLKBLK_1;
+#endif
+
+#define NUM_EPS 3
+
+void main()
+{
+#if APP_XUH_PLAYER_MPEG_AUDIO
+    chan c_audio;
+#endif
+    chan xuhChans_out[NUM_EPS];
+    chan xuhChans_in[NUM_EPS];
+#if APP_XUH_PLAYER_ENABLE_LCD
+    interface spi_master_if lcd_spi[1];
+#endif
+#if APP_XUH_PLAYER_ENABLE_LCD
+    chan c_lcd_image;
+#endif
+#if MSC_JPEG_PIPELINE
+    chan c_jpeg_load, c_jpeg_output, c_lcd_render;
+#elif MSC_MPEG_PIPELINE
+    chan c_mpeg_load, c_lcd_render;
+#endif
+
+    par
+    {
+#if APP_XUH_PLAYER_MPEG_AUDIO
+        on tile[0]: mp2_audio_task(c_audio);
+#endif
+#if APP_XUH_PLAYER_ACTIVITY_LED
+        on tile[1]: activity_led_task();
+#endif
+#if APP_XUH_PLAYER_ENABLE_LCD
+        on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
+                               null, p_lcd_cs, 1, lcd_spi_clock);
+#if MSC_JPEG_PIPELINE
+        on tile[0]: jpeg_pipeline_receive(c_lcd_image, c_lcd_render);
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_render);
+        on tile[1]: jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
+        on tile[1]: jpeg_pipeline_transmit(c_jpeg_output, c_lcd_image);
+#elif MSC_MPEG_PIPELINE
+        on tile[0]: mpeg_pipeline_receive(c_lcd_image, c_lcd_render);
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_render);
+        on tile[1]: mpeg_pipeline_decode(c_mpeg_load, c_lcd_image);
+#else
+        on tile[0]: lcd_display_task(lcd_spi[0], c_lcd_image);
+#endif
+#endif
+
+#ifndef DEBUG
+        on tile[1]:
+        {
+            XUH_Manager(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS);
+        }
+#endif
+
+        on tile[1]:
+        {
+            USBHost(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS
+#if APP_XUH_PLAYER_ENABLE_LCD
+#if MSC_JPEG_PIPELINE
+                    , c_jpeg_load
+#elif MSC_MPEG_PIPELINE
+                    , c_mpeg_load
+#else
+                    , c_lcd_image
+#endif
+#endif
+#if APP_XUH_PLAYER_MPEG_AUDIO
+                    , c_audio
+#endif
+                    );
+        }
+    }
+}

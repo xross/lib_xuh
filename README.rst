@@ -42,15 +42,15 @@ build configurations. The program-stream player decodes and discards MP2 audio;
 it does not provide audio output or A/V synchronisation. Playback runs at maximum
 speed and reports completed-play metrics through xSCOPE. Build commands, pipeline
 details and limitations are in
-`the display pipeline guide <examples/app_xuh_msc/doc/rst/pipeline.rst>`_.
+`the display pipeline guide <examples/app_xuh_player/doc/rst/pipeline.rst>`_.
 
 ILI9341 / ST7789V display
 =========================
 
 The XU316 mass storage example supports ILI9341 and ST7789V 240 by 320 LCDs,
 used in 320 by 240 landscape orientation. ILI9341 is the default. Select ST7789V
-with ``-DAPP_XUH_MSC_LCD_CONTROLLER=ST7789V`` when configuring CMake, or ILI9341 with
-``-DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341``. The controller choice applies to all
+with ``-DAPP_XUH_PLAYER_LCD_CONTROLLER=ST7789V`` when configuring CMake, or ILI9341 with
+``-DAPP_XUH_PLAYER_LCD_CONTROLLER=ILI9341``. The controller choice applies to all
 three video build configurations.
 
 JPEG RGB888 pixels or MPEG YUV420 strips cross from tile 1 to tile 0 and are
@@ -59,8 +59,8 @@ black borders; MPEG playback requires 320 by 240. The complete framebuffer is
 assembled before the SPI transaction starts, and chip select remains asserted
 from the address-window commands through all pixel data for each update.
 
-Set ``APP_XUH_MSC_ENABLE_LCD=OFF`` when configuring with CMake to disable the
-display. Set ``APP_XUH_MSC_LCD_TEST_MODE=ON`` to replace JPEG rendering with a
+Set ``APP_XUH_PLAYER_ENABLE_LCD=OFF`` when configuring with CMake to disable the
+display. Set ``APP_XUH_PLAYER_LCD_TEST_MODE=ON`` to replace JPEG rendering with a
 32 by 32 moving-box test. Each animation step updates only the 33 by 32 region
 covering the old and new box positions.
 

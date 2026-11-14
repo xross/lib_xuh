@@ -10,12 +10,15 @@ UNRELEASED
     with a multiple-packet data stage; ``XUH_Host_ClaimEndpoint()``;
     an activity callback, ``XUH_Host_SetActivityCallback()``.
   * ADDED: Mass storage class driver (``xuh_msc.h``), moved from the
-    ``app_xuh_msc`` example, and optional FatFs disk functions selected with
+    ``app_xuh_player`` example, and optional FatFs disk functions selected with
     ``XUH_MSC_FATFS``.
   * ADDED: ``xuh_config.h`` defaults, overridden by an optional application
     ``xuh_conf.h``.
-  * CHANGED: The ``app_xuh_msc`` example uses the host core and mass storage
+  * CHANGED: The ``app_xuh_player`` example uses the host core and mass storage
     driver; its ``USBHost()`` takes all of the transport's channels.
+  * CHANGED: The video player example is renamed from ``app_xuh_msc`` to
+    ``app_xuh_player``, and its ``APP_XUH_MSC_*`` options to
+    ``APP_XUH_PLAYER_*``.
   * FIXED: SET_CONFIGURATION uses the configuration value of the device rather
     than 1; GET_MAX_LUN names the mass storage interface rather than 0.
   * REMOVED: ``XUH_ControlTransfer_In()``, ``XUH_SetAddress()``,
