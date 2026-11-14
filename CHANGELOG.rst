@@ -4,6 +4,10 @@ lib_xuh change log
 UNRELEASED
 ----------
 
+  * CHANGED: The player FPS gauge uses the MPEG sequence-header rate for its
+    target tick; measured playback throughput remains separate
+  * ADDED: Centred smaller MPEG pictures in the storage example, with a fixed
+    screen-position FPS gauge and configurable long input filenames
   * ADDED: Host core (``xuh_host.h``): ``XUH_Host_WaitForDevice()`` enumerates
     the attached device and reports its interfaces and endpoints;
     ``XUH_Host_ControlIn()`` and ``XUH_Host_ControlNoData()`` control transfers,

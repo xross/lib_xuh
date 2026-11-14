@@ -28,6 +28,7 @@ static void report_frame_timing(const char *name, const frame_timing_t *timing)
 static unsigned char input[2][MPEG_LOAD_BYTES] __attribute__((aligned(4)));
 static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2] __attribute__((aligned(4)));
 static unsigned strip[PIPELINE_LCD_WIDTH * 3 / 4];
+static video_window_t lcd_windows[2];
 /* Decoder memory, owned by the decode task's tile and passed to mpeg_open(). */
 static unsigned char video_memory[MPEG_VIDEO_MEMORY_SIZE] __attribute__((aligned(8)));
 typedef unsigned __attribute__((may_alias)) plane_word_t;
@@ -43,6 +44,7 @@ static unsigned hash_bytes(const unsigned char *data, unsigned count)
 
 VIDEO_SOURCE_BUFFER unsigned char *mpeg_pipeline_input_buffer(unsigned slot) { return input[slot]; }
 unsigned char *mpeg_pipeline_lcd_buffer(unsigned slot) { return lcd_frames[slot]; }
+video_window_t mpeg_pipeline_lcd_window(unsigned slot) { return lcd_windows[slot]; }
 unsigned mpeg_pipeline_check_lcd(unsigned slot)
 {
 #if PIPELINE_VERIFY
@@ -83,6 +85,11 @@ static void send_frame(chanend c_image, const mpeg_frame_t *frame,
     chanend_out_word(c_image, frame->number);
     chanend_out_word(c_image, frame->width);
     chanend_out_word(c_image, frame->height);
+    /* Only the display position needs tenths; the codec API retains the exact
+     * rational, including 24000/1001 and 30000/1001 source rates. */
+    unsigned rate_tenths = (frame->frame_rate_num * 10 + frame->frame_rate_den / 2) /
+                          frame->frame_rate_den;
+    chanend_out_word(c_image, rate_tenths);
     /* Transfer two Y rows plus their Cb/Cr row. Decoder-owned planes remain
      * valid until tile 0 acknowledges staging; only then may decode continue. */
     for (unsigned y = 0; y < frame->height; y += 2) {
@@ -138,9 +145,15 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
 #endif
             activity_led_decode(result < 0 ? ACTIVITY_LED_ERROR : 0);
             if (result == MPEG_FRAME) {
-                /* Fixed full-screen protocol; reject before publishing a frame. */
-                if (frame.width != PIPELINE_LCD_WIDTH || frame.height != PIPELINE_LCD_HEIGHT ||
+                /* Reject unsupported geometry before publishing any payload. */
+                if (!video_window_valid(frame.width, frame.height) ||
                     frame.number != decoded) { result = MPEG_UNSUPPORTED; break; }
+                if (!decoded) {
+                    video_window_t window = video_window_center(frame.width, frame.height);
+                    printf("MPEG picture: %ux%u centred at (%u,%u), source rate=%u/%u FPS\n",
+                           frame.width, frame.height, window.x, window.y,
+                           frame.frame_rate_num, frame.frame_rate_den);
+                }
                 activity_led_decode(ACTIVITY_LED_FRAME);
                 start = get_reference_time();
                 send_frame(c_image, &frame, &send_us, &ack_wait_us);
@@ -219,8 +232,8 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 pipeline_send(c_load, ack, 2);
             }
         }
-        unsigned stop[3] = {PIPELINE_STOP, 0, 0};
-        pipeline_send(c_image, stop, 3);
+        unsigned stop[4] = {PIPELINE_STOP, 0, 0, 0};
+        pipeline_send(c_image, stop, 4);
         pipeline_receive(c_image, stats, PIPELINE_STATS_WORDS);
         if (opened) {
             mpeg_memory_stats_t memory = mpeg_memory_stats();
@@ -271,18 +284,25 @@ static void receive_play(chanend c_image, chanend c_render)
         unsigned sequence = chanend_in_word(c_image);
         unsigned width = chanend_in_word(c_image);
         unsigned height = chanend_in_word(c_image);
+        unsigned rate_tenths = chanend_in_word(c_image);
         if (sequence == PIPELINE_STOP) {
             chanend_check_control_token(c_image, XS1_CT_END);
             break;
         }
-        if (width != PIPELINE_LCD_WIDTH || height != PIPELINE_LCD_HEIGHT) __builtin_trap();
+        if (!video_window_valid(width, height) || !rate_tenths || rate_tenths > 600) __builtin_trap();
         if (sequence != expected) ++stats[PIPELINE_ERRORS];
         ++expected;
         unsigned slot = sequence & 1;
+        video_window_t window = video_window_center(width, height);
+        /* A slot is owned by this receiver until published to the renderer.
+         * Clear stale borders only when its geometry changes, not per frame. */
+        if (lcd_windows[slot].width != width || lcd_windows[slot].height != height)
+            memset(lcd_frames[slot], 0, sizeof(lcd_frames[slot]));
+        lcd_windows[slot] = window;
         unsigned receive_ticks = 0, convert_ticks = 0;
         for (unsigned y = 0; y < height; y += 2) {
             unsigned start = get_reference_time();
-            for (unsigned index = 0; index < sizeof(strip) / sizeof(strip[0]); ++index)
+            for (unsigned index = 0; index < width * 3 / 4; ++index)
                 strip[index] = chanend_in_word(c_image);
             /* Keep strip writes and conversion on their respective sides of
              * this timing boundary. Reception includes blocked channel time. */
@@ -291,10 +311,10 @@ static void receive_play(chanend c_image, chanend c_render)
             asm volatile("" ::: "memory");
             /* The strip holds Y row, Y row, Cb row, Cr row without padding. */
             const unsigned char *rows = (const unsigned char *)strip;
-            unsigned char *output = lcd_frames[slot] + y * width * 2;
+            unsigned char *output = lcd_frames[slot] + video_window_rgb_offset(window, y);
             mpeg_yuv420_rows_to_rgb565(rows, rows + width, rows + 2 * width,
                                         rows + 2 * width + width / 2,
-                                        output, output + width * 2, width);
+                                        output, output + PIPELINE_LCD_WIDTH * 2, width);
             asm volatile("" ::: "memory");
             unsigned converted = get_reference_time();
             receive_ticks += received - start;
@@ -307,6 +327,7 @@ static void receive_play(chanend c_image, chanend c_render)
         stats[PIPELINE_RECEIVE_TICKS] += receive_ticks / 100;
         stats[PIPELINE_CONVERT_TICKS] += convert_ticks / 100;
 #if APP_XUH_PLAYER_FPS_OVERLAY
+        fps.target_tenths = rate_tenths;
         fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
 #endif
 #if PIPELINE_VERIFY

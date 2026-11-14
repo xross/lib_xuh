@@ -6,3 +6,4 @@ lib_xud TODO
 - add real time to get_fattime()
 - Share USB spec enums/defines etc with lib_xud
 - Merge with lib_xud?
+- USE LVGL for overlay graphics?

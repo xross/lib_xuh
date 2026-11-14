@@ -9,9 +9,10 @@
 #include "lcd_display.h"
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
+#include "fps_overlay.h"
 
-#define LCD_WIDTH        320
-#define LCD_HEIGHT       240
+#define LCD_WIDTH        PIPELINE_LCD_WIDTH
+#define LCD_HEIGHT       PIPELINE_LCD_HEIGHT
 #define LCD_SPI_KHZ      50000
 #define BOX_SIZE         32
 #define BOX_UPDATE_WIDTH (BOX_SIZE + 1)
@@ -285,9 +286,28 @@ static void lcd_render_image(client spi_master_if spi, chanend c_image)
 #endif
 
 #if MSC_VIDEO_PIPELINE
+/* lib_spi's synchronous array length is a compile-time parameter. Preserve
+ * the single-call full-width path; other MPEG widths are multiples of eight. */
+static void lcd_write_video_row(client spi_master_if spi,
+                                const uint8_t data[], unsigned bytes)
+{
+    if (bytes == LCD_WIDTH * 2) {
+        spi.transfer_array(data, null, LCD_WIDTH * 2);
+        return;
+    }
+    unsigned offset = 0;
+    for (; offset + 64 <= bytes; offset += 64)
+        spi.transfer_array(&data[offset], null, 64);
+    for (; offset < bytes; offset += 8)
+        spi.transfer_array(&data[offset], null, 8);
+}
+
 static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 {
     unsigned expected = 0;
+#if MSC_MPEG_PIPELINE
+    unsigned previous_width = LCD_WIDTH, previous_height = LCD_HEIGHT;
+#endif
     timer profile_timer;
     while (1) {
         unsigned slot = inuint(c_render);
@@ -311,14 +331,38 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
         unsafe {
 #if MSC_MPEG_PIPELINE
             unsigned char * unsafe buffer = mpeg_pipeline_lcd_buffer(slot);
+            video_window_t window = mpeg_pipeline_lcd_window(slot);
+            if (window.width != previous_width || window.height != previous_height) {
+                lcd_fill_screen(spi, RGB565_BLACK);
+                previous_width = window.width;
+                previous_height = window.height;
+            }
 #else
             unsigned char * unsafe buffer = jpeg_pipeline_lcd_buffer(slot);
+            video_window_t window = {0, 0, LCD_WIDTH, LCD_HEIGHT};
 #endif
-            lcd_begin_window(spi, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
-            for (unsigned y = 0; y < LCD_HEIGHT; ++y)
-                spi.transfer_array((const uint8_t *)(buffer + y * LCD_WIDTH * 2),
-                                   null, LCD_WIDTH * 2);
+            lcd_begin_window(spi, window.x, window.y,
+                             window.x + window.width - 1, window.y + window.height - 1);
+            for (unsigned y = 0; y < window.height; ++y)
+                lcd_write_video_row(spi,
+                    (const uint8_t *)(buffer + video_window_rgb_offset(window, y)), window.width * 2);
             spi.end_transaction(0);
+#if MSC_MPEG_PIPELINE && APP_XUH_PLAYER_FPS_OVERLAY
+            /* The gauge is drawn in screen coordinates. If any of it lies
+             * outside the video, refresh its fixed rectangle separately. */
+            if (window.x > FPS_OVERLAY_X || window.y > FPS_OVERLAY_Y ||
+                window.x + window.width < FPS_OVERLAY_X + FPS_OVERLAY_WIDTH ||
+                window.y + window.height < FPS_OVERLAY_Y + FPS_OVERLAY_HEIGHT) {
+                lcd_begin_window(spi, FPS_OVERLAY_X, FPS_OVERLAY_Y,
+                                 FPS_OVERLAY_X + FPS_OVERLAY_WIDTH - 1,
+                                 FPS_OVERLAY_Y + FPS_OVERLAY_HEIGHT - 1);
+                for (unsigned y = 0; y < FPS_OVERLAY_HEIGHT; ++y)
+                    spi.transfer_array((const uint8_t *)(buffer +
+                        ((FPS_OVERLAY_Y + y) * LCD_WIDTH + FPS_OVERLAY_X) * 2),
+                        null, FPS_OVERLAY_WIDTH * 2);
+                spi.end_transaction(0);
+            }
+#endif
         }
         profile_timer :> end;
 #if MSC_MPEG_PIPELINE

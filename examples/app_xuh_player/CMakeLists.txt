@@ -86,6 +86,13 @@ set(XMOS_SANDBOX_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../)
 # flags, re-enabling dual issue for this file only.
 set(APP_COMPILER_FLAGS_mpeg_pipeline.c -mdual-issue)
 option(APP_XUH_PLAYER_AUDIO_DECODE "Decode MP2 in mpeg1_audio (OFF measures MPG demux/I/O only)" ON)
+set(APP_XUH_PLAYER_MPEG_FILE "" CACHE STRING "MPEG input filename; empty uses VIDEO.M1V or VIDEO.MPG by configuration")
+if(NOT APP_XUH_PLAYER_MPEG_FILE STREQUAL "")
+    if(NOT APP_XUH_PLAYER_MPEG_FILE MATCHES "^[A-Za-z0-9_.-]+$")
+        message(FATAL_ERROR "APP_XUH_PLAYER_MPEG_FILE must be a filename without a path")
+    endif()
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_PLAYER_MPEG_FILE=\"${APP_XUH_PLAYER_MPEG_FILE}\")
+endif()
 
 set(APP_COMPILER_FLAGS_jpeg ${APP_COMPILER_FLAGS} -DAPP_XUH_PLAYER_ENABLE_MPEG1=0)
 if(APP_XUH_PLAYER_ENABLE_LCD AND NOT APP_XUH_PLAYER_LCD_TEST_MODE)

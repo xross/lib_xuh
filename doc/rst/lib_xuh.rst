@@ -301,7 +301,7 @@ benchmark configuration:
      - Run a moving-box LCD test instead of JPEG playback
    * - ``APP_XUH_PLAYER_FPS_OVERLAY``
      - ``ON``
-     - Draw a smoothed measured-FPS gauge with a 25-FPS target
+     - Draw a smoothed measured-FPS gauge with the MPEG source-rate target
    * - ``APP_XUH_PLAYER_ACTIVITY_LED``
      - ``ON`` on AIV
      - Enable the activity/status LED task
@@ -311,6 +311,9 @@ benchmark configuration:
    * - ``APP_XUH_PLAYER_AUDIO_DECODE``
      - ``ON``
      - In ``mpeg1_audio``, decode MP2; ``OFF`` measures demux/I/O only
+   * - ``APP_XUH_PLAYER_MPEG_FILE``
+     - Empty
+     - Override the MPEG root filename; the defaults remain configuration-specific
    * - ``APP_XUH_PLAYER_FRAME_TIMING``
      - ``OFF``
      - Collect MPEG decode and service-period histograms
@@ -324,6 +327,20 @@ Library options are set in an application ``mpeg_conf.h``, for example
 ``#define MPEG_RGB565_VPU 0`` for scalar colour conversion. They are not CMake
 cache options. See the ``lib_mpeg`` guide
 for arithmetic/accuracy differences and the MP2 options.
+
+For a named, smaller program stream on the USB stick, retain the audio/program-
+stream configuration and select its filename without renaming the file::
+
+    cmake -G "Unix Makefiles" -S examples/app_xuh_player -B build-small-video \
+      -DAPP_XUH_PLAYER_MPEG_FILE=VIDEO_320x180.MPG
+    xmake -C build-small-video app_xuh_player_mpeg1_audio
+    xrun --xscope --xscope-io-only \
+      build-small-video/bin/mpeg1_audio/app_xuh_player_mpeg1_audio.xe
+
+The filename selects the input, not its dimensions or format. The ``mpeg1``
+configuration still requires elementary video; ``mpeg1_audio`` demultiplexes MPG.
+The application's FatFs configuration enables long filenames with a static
+workspace owned by its single filesystem task.
 
 LCD connection
 --------------
@@ -380,10 +397,31 @@ borders. The buffered reader validates JPEG segment lengths, entropy stuffing,
 restart markers, truncation and buffer limits, including split disk-read
 boundaries. Raw MJPEG carries no presentation timestamps; AVI is unsupported.
 
-MPEG video must be fixed-resolution, progressive 320 x 240 MPEG-1 YUV420. The
+MPEG video must be fixed-resolution, progressive MPEG-1 YUV420, no larger than
+320 x 240, with width divisible by eight and even height. Dimensions are read
+from the stream, not inferred from its filename. Smaller pictures are centred
+without scaling: 320 x 180 starts at screen coordinate (0, 30). The
 elementary-stream player accepts I, P and B pictures, not an MPG/AVI container.
 A compressed picture plus decoder lookahead must fit the 32-KiB input buffer;
 reduce quality or bitrate if an encode exceeds that bound.
+
+RGB slots retain the screen stride and capacity. Each slot's black borders are
+cleared when its picture dimensions change; only the centred picture rectangle
+is transmitted each frame. The physical LCD is cleared when dimensions change
+to remove a previous larger picture. The FPS gauge always occupies the same
+screen rectangle, (4, 4) through (107, 25), regardless of video size. Small text
+sits above a 96-pixel-wide bar, with four black rows before a centred
+320 x 180 picture. If the
+picture does not cover the gauge, its fixed rectangle is refreshed separately;
+black borders do not otherwise consume recurring transfer bandwidth.
+
+For MPEG, the white tick marks the nominal frame rate read from the stream's
+sequence header, rounded to tenths for display positioning. The bar's colour
+gradient reaches green at that target; the numeric reading and filled length
+remain measured playback throughput. The scale is 0--40 FPS for sources up to
+40 FPS and expands for 50/60-FPS sources to keep the tick visible. MJPEG has no
+sequence-header rate and retains a 25-FPS reference. Position and size are
+independent of the target rate.
 
 The program-stream player supports MPEG-1 pack/PES headers, video stream 0xe0
 and MP2 audio stream 0xc0. It skips other packet types and rejects MPEG-2 pack
@@ -542,6 +580,14 @@ The 25.471-ms LCD transaction gives an approximately 39.3-FPS display ceiling,
 but the whole player is not at that ceiling.
 
 These figures describe one clip, not a worst-case or guaranteed 30-FPS rate.
+For a separate 320 x 180 re-encode of the reference clip, centred at (0, 30),
+the ``mpeg1_audio`` player completes 3026 displayed pictures in 74.941 seconds
+(40.37 FPS), with mean video decode time 15.463 ms and LCD-transfer time
+20.341 ms per frame. That run has MP2 decode/discard enabled (5042 blocks),
+the FPS gauge fixed at (4, 4), and no timing histograms. Both complete plays
+report zero errors and zero live video-arena bytes after close. This is a
+different encoded workload/configuration, not a matched decoder-speed comparison.
+
 Optional instrumented runs report decode and decoder service-period
 percentiles, maxima and counts above 40 ms for the current build/input.
 Service intervals mark successive YUV handoffs, not LCD scanout; they are not
@@ -639,8 +685,12 @@ the histograms. For the audio-enabled player's bounded hardware smoke check, use
 
 The finite ``tests/app_mpeg_pipeline`` fixture exercises the actual decoder,
 cross-tile transfer and receiver with host-file input and a checksum renderer.
-It validates native-model RGB565 hashes, delayed-renderer ownership, repeat/EOF
-drain and open/read/empty-input recovery. It does not model USB or physical SPI.
+It validates native-model RGB565 hashes including black borders, resolution
+changes between plays, delayed-renderer ownership, repeat/EOF drain and
+open/read/empty-input recovery. It does not model USB or physical SPI.
+Generated elementary fixtures include an explicit MPEG sequence-end marker:
+the current decoder can leave final B-picture macroblocks unwritten on some
+unterminated elementary streams. These fixtures do not validate that codec case.
 With XTC Tools active, build a host reference first, then the six-picture fixture::
 
     cmake -S ../lib_mpeg/tests -B ../lib_mpeg/build-pipeline-reference
@@ -656,7 +706,11 @@ With XTC Tools active, build a host reference first, then the six-picture fixtur
       --adapter-id SERIAL --jtag
 
 Success requires normal termination, seven completed cases and all expected
-frame hashes. Timeouts/cycle bounds are failures, not passes. JTAG is suitable
+frame hashes. Add ``--width 320 --height 180`` (or ``--width 256 --height 144``)
+to test centred input; the second play uses an alternate resolution and the
+remaining successful plays return to the requested size. The native window
+test checks geometry, black borders, screen stride and the fixed gauge position.
+Timeouts/cycle bounds are failures, not passes. JTAG is suitable
 only for this substituted functional fixture, not the real USB player. The stock
 simulator target uses xSCOPE on XL0 while AIV uses XL1; the JTAG fixture avoids
 that wiring mismatch. Omit hardware options to use the simulator with a suitable

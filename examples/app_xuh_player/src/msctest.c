@@ -189,7 +189,9 @@ static unsigned long long mpeg_bytes;
 static mpeg_ps_reader_t mpeg_ps;
 static chanend mpeg_audio_channel;
 static unsigned audio_stats[AUDIO_STATS_WORDS];
-#define MPEG_FILE_NAME "VIDEO.MPG"
+#ifndef APP_XUH_PLAYER_MPEG_FILE
+#define APP_XUH_PLAYER_MPEG_FILE "VIDEO.MPG"
+#endif
 
 PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data,
                                             unsigned capacity, unsigned *bytes)
@@ -206,8 +208,11 @@ PS_AUDIO_CALLBACK static int mpeg_ps_audio_send(void *context,
     return audio_pipeline_send(*(chanend *)context, data, bytes);
 }
 #else
-#define MPEG_FILE_NAME "VIDEO.M1V"
+#ifndef APP_XUH_PLAYER_MPEG_FILE
+#define APP_XUH_PLAYER_MPEG_FILE "VIDEO.M1V"
 #endif
+#endif
+#define MPEG_FILE_NAME APP_XUH_PLAYER_MPEG_FILE
 
 VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
 {
@@ -241,7 +246,7 @@ VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *dest
     FRESULT rc = f_read(&mpeg_file, destination, capacity, &count);
     *bytes = count;
     mpeg_bytes += count;
-    if (rc) { printf("VIDEO.M1V: disk rc=%u\n", rc); return -1; }
+    if (rc) { printf("%s: disk rc=%u\n", MPEG_FILE_NAME, rc); return -1; }
     /* On this regular file, a zero-length read is the end of the stream. */
     return count ? 1 : 0;
 #endif

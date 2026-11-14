@@ -2,13 +2,14 @@
 #include "video_config.h"
 
 #if MSC_VIDEO_PIPELINE && APP_XUH_PLAYER_FPS_OVERLAY
-enum { GLYPH_WIDTH = 5, GLYPH_HEIGHT = 7, SCALE = 2, ORIGIN_X = 4, ORIGIN_Y = 4,
+enum { GLYPH_WIDTH = 5, GLYPH_HEIGHT = 7, SCALE = 1,
+        ORIGIN_X = FPS_OVERLAY_X, ORIGIN_Y = FPS_OVERLAY_Y,
         CELL = (GLYPH_WIDTH + 1) * SCALE, TEXT_LENGTH = 8,
         GLYPH_DOT = 10, GLYPH_F, GLYPH_P, GLYPH_S, GLYPH_SPACE, GLYPH_DASH,
-        TEXT_X = 4, TEXT_Y = 3,
-        BAR_X = TEXT_X, BAR_Y = 22, BAR_WIDTH = TEXT_LENGTH * CELL, BAR_HEIGHT = 8,
-        BOX_WIDTH = BAR_WIDTH + 2 * BAR_X, BOX_HEIGHT = 34,
-        TARGET_TENTHS = 250, MAX_TENTHS = 400,
+        TEXT_X = (FPS_OVERLAY_WIDTH - TEXT_LENGTH * CELL) / 2, TEXT_Y = 2,
+        BAR_X = 4, BAR_Y = 15, BAR_WIDTH = 96, BAR_HEIGHT = 2,
+        BOX_WIDTH = FPS_OVERLAY_WIDTH, BOX_HEIGHT = FPS_OVERLAY_HEIGHT,
+        DEFAULT_TARGET_TENTHS = 250, MIN_MAX_TENTHS = 400,
         BACKGROUND = 0x0841, BORDER = 0x4208, TRACK = 0x18c3, LABEL = 0xd6ba,
         WINDOW_TICKS = PIPELINE_TICKS_PER_SECOND / 2 };
 
@@ -38,14 +39,14 @@ static void fill(unsigned char *frame, unsigned x, unsigned y,
     }
 }
 
-static unsigned gradient_color(unsigned column)
+static unsigned gradient_color(unsigned column, unsigned target)
 {
     /* Fixed spatial ramp: richer brick, amber and leaf green, reaching green
-     * at the 25-FPS target and retaining it above that. No neon primaries.
+     * at the source-rate target and retaining it above that. No neon primaries.
      * Revealing more of the bar never recolours its red left edge. */
-    unsigned target = TARGET_TENTHS * BAR_WIDTH / MAX_TENTHS;
     if (column >= target) return (10u << 11) | (43u << 5) | 10u;
     unsigned middle = target / 2;
+    if (!middle) middle = 1;
     unsigned first = column <= middle;
     unsigned position = first ? column : column - middle;
     unsigned span = first ? middle : target - middle;
@@ -58,10 +59,14 @@ static unsigned gradient_color(unsigned column)
     return (red << 11) | (green << 5) | blue;
 }
 
-static void draw(unsigned char *frame, unsigned tenths, unsigned measured)
+static void draw(unsigned char *frame, unsigned tenths, unsigned measured, unsigned target_tenths)
 {
-    unsigned capped = tenths > MAX_TENTHS ? MAX_TENTHS : tenths;
-    unsigned filled = measured ? capped * BAR_WIDTH / MAX_TENTHS : 0;
+    if (!target_tenths) target_tenths = DEFAULT_TARGET_TENTHS;
+    unsigned maximum = target_tenths > MIN_MAX_TENTHS ? target_tenths : MIN_MAX_TENTHS;
+    unsigned target = target_tenths * BAR_WIDTH / maximum;
+    if (target >= BAR_WIDTH) target = BAR_WIDTH - 1;
+    unsigned capped = tenths > maximum ? maximum : tenths;
+    unsigned filled = measured ? capped * BAR_WIDTH / maximum : 0;
     if (tenths > 999) tenths = 999;
     unsigned char text[TEXT_LENGTH] = {
         tenths >= 100 ? tenths / 100 : GLYPH_SPACE, tenths / 10 % 10, GLYPH_DOT, tenths % 10,
@@ -85,9 +90,9 @@ static void draw(unsigned char *frame, unsigned tenths, unsigned measured)
     fill(frame, BAR_X - 1, BAR_Y - 1, BAR_WIDTH + 2, BAR_HEIGHT + 2, BORDER);
     fill(frame, BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, TRACK);
     for (unsigned x = 0; x < filled; ++x)
-        fill(frame, BAR_X + x, BAR_Y, 1, BAR_HEIGHT, gradient_color(x));
-    /* Fixed target marker remains visible both ahead of and inside the fill. */
-    unsigned target_x = BAR_X + TARGET_TENTHS * BAR_WIDTH / MAX_TENTHS;
+        fill(frame, BAR_X + x, BAR_Y, 1, BAR_HEIGHT, gradient_color(x, target));
+    /* Source-rate marker remains visible both ahead of and inside the fill. */
+    unsigned target_x = BAR_X + target;
     fill(frame, target_x, BAR_Y - 2, 1, BAR_HEIGHT + 4, 0xffff);
     fill(frame, target_x - 1, BAR_Y - 3, 3, 1, 0xffff);
 }
@@ -110,6 +115,6 @@ void fps_overlay_frame(fps_overlay_t *state, unsigned now, unsigned char *frame)
             state->frames = 0;
         }
     }
-    draw(frame, state->tenths, state->measured);
+    draw(frame, state->tenths, state->measured, state->target_tenths);
 }
 #endif

@@ -12,12 +12,13 @@
 enum { CASE_GOOD, CASE_OPEN_FAILS, CASE_READ_FAILS, CASE_EMPTY };
 static FILE *file;
 static unsigned test_case;
+static unsigned play_number;
 
 VIDEO_SOURCE_OPEN static int source_open(void *context)
 {
     (void)context;
     if (test_case == CASE_OPEN_FAILS) return 1;
-    file = fopen("VIDEO.M1V", "rb");
+    file = fopen(play_number == 2 ? "ALT.M1V" : "VIDEO.M1V", "rb");
     return file ? 0 : 1;
 }
 
@@ -48,6 +49,7 @@ void test_loader(chanend c_load)
     static video_play_t play;
     setbuf(stdout, NULL);
     for (unsigned number = 1; number <= 7; ++number) {
+        play_number = number;
         test_case = number == 4 ? CASE_OPEN_FAILS : number == 5 ? CASE_READ_FAILS :
                     number == 6 ? CASE_EMPTY : CASE_GOOD;
         video_loader_play(c_load, &source, &play);
@@ -81,19 +83,26 @@ void test_renderer(chanend c_render)
 {
     hwtimer_t timer = hwtimer_alloc();
     unsigned expected = 0;
-    unsigned expected_hash[MPEG_PIPELINE_TEST_FRAMES];
-    FILE *hash_file = fopen("HASHES.TXT", "r");
-    CHECK(hash_file);
-    for (unsigned i = 0; i < MPEG_PIPELINE_TEST_FRAMES; ++i)
-        CHECK(fscanf(hash_file, "%x", &expected_hash[i]) == 1);
-    CHECK(!fclose(hash_file));
+    unsigned expected_hash[2][MPEG_PIPELINE_TEST_FRAMES];
+    for (unsigned variant = 0; variant < 2; ++variant) {
+        FILE *hash_file = fopen(variant ? "ALTHASHES.TXT" : "HASHES.TXT", "r");
+        CHECK(hash_file);
+        for (unsigned i = 0; i < MPEG_PIPELINE_TEST_FRAMES; ++i)
+            CHECK(fscanf(hash_file, "%x", &expected_hash[variant][i]) == 1);
+        CHECK(!fclose(hash_file));
+    }
+    unsigned play = 1;
     for (;;) {
         unsigned ready[2];
         pipeline_receive(c_render, ready, 2);
-        if (ready[0] == PIPELINE_STOP) { expected = 0; continue; }
+        if (ready[0] == PIPELINE_STOP) { expected = 0; ++play; continue; }
         CHECK(ready[0] == (expected & 1) && ready[1] == expected);
         CHECK(expected < MPEG_PIPELINE_TEST_FRAMES);
         CHECK(!mpeg_pipeline_check_lcd(ready[0]));
+        video_window_t window = mpeg_pipeline_lcd_window(ready[0]);
+        CHECK(video_window_valid(window.width, window.height));
+        CHECK(window.x == (PIPELINE_LCD_WIDTH - window.width) / 2 &&
+              window.y == (PIPELINE_LCD_HEIGHT - window.height) / 2);
         /* Deliberately slower than reception/conversion/decode: early YUV
          * acknowledgement must not allow reuse of the RGB slot being read. */
         hwtimer_delay(timer, 10000000);
@@ -102,7 +111,17 @@ void test_renderer(chanend c_render)
         for (unsigned i = 0; i < PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2; ++i)
             hash = (hash ^ buffer[i]) * 16777619u;
         CHECK(!mpeg_pipeline_check_lcd(ready[0]));
-        CHECK(hash == expected_hash[expected]);
+        if (hash != expected_hash[play == 2][expected]) {
+            printf("Mismatch play=%u frame=%u actual=%08x expected=%08x\n",
+                   play, expected, hash, expected_hash[play == 2][expected]);
+            for (unsigned y = 0; y < PIPELINE_LCD_HEIGHT; ++y)
+                for (unsigned x = 0; x < PIPELINE_LCD_WIDTH; ++x)
+                    if (x < window.x || x >= window.x + window.width ||
+                        y < window.y || y >= window.y + window.height)
+                        CHECK(!buffer[(y * PIPELINE_LCD_WIDTH + x) * 2] &&
+                              !buffer[(y * PIPELINE_LCD_WIDTH + x) * 2 + 1]);
+        }
+        CHECK(hash == expected_hash[play == 2][expected]);
         printf("RGB565 frame=%u hash=%08x\n", expected, hash);
         /* Delay is a backpressure fixture, not an SPI throughput measurement. */
         unsigned ack[3] = {expected++, 0, 0};
