@@ -19,6 +19,8 @@ UNRELEASED
   * CHANGED: The video player example is renamed from ``app_xuh_msc`` to
     ``app_xuh_player``, and its ``APP_XUH_MSC_*`` options to
     ``APP_XUH_PLAYER_*``.
+  * ADDED: Basic ``app_xuh_msc`` example: lists the root directory of a mass
+    storage device and prints a text file.
   * FIXED: SET_CONFIGURATION uses the configuration value of the device rather
     than 1; GET_MAX_LUN names the mass storage interface rather than 0.
   * REMOVED: ``XUH_ControlTransfer_In()``, ``XUH_SetAddress()``,

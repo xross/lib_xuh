@@ -31,12 +31,16 @@ enumerates the attached device and describes it to the application, and a
 read-only mass storage class driver with optional FatFs disk functions. Usage
 is described in `the library guide <doc/rst/lib_xuh.rst>`_.
 
-The USB mass storage example demonstrates mounting storage media with FatFs and
-reading files from a USB mass storage device. The example supports XK-EVK-XU316
-targets, defaults to XK-EVK-XU316-AIV and assumes VBUS is hardwired. The library's
-XS2 transport support is separate from the XU316-only example application.
+There are two examples, both for XK-EVK-XU316 with VBUS hardwired. The library's
+XS2 transport support is separate from these XU316-only applications.
 
-The XU316 mass storage app provides ``jpeg`` (``VIDEO.MJP``), ``mpeg1``
+``app_xuh_msc`` is the basic one. It enumerates the attached device, mounts a
+USB mass storage volume with FatFs, lists the root directory and prints the
+first ``.TXT`` file in it.
+
+``app_xuh_player`` is a video player that reads from USB mass storage and
+renders to an SPI LCD. It supports XK-EVK-XU316 targets and defaults to
+XK-EVK-XU316-AIV. It provides ``jpeg`` (``VIDEO.MJP``), ``mpeg1``
 (``VIDEO.M1V`` elementary video) and ``mpeg1_audio`` (``VIDEO.MPG`` program stream)
 build configurations. The program-stream player decodes and discards MP2 audio;
 it does not provide audio output or A/V synchronisation. Playback runs at maximum
@@ -47,7 +51,7 @@ details and limitations are in
 ILI9341 / ST7789V display
 =========================
 
-The XU316 mass storage example supports ILI9341 and ST7789V 240 by 320 LCDs,
+The video player example supports ILI9341 and ST7789V 240 by 320 LCDs,
 used in 320 by 240 landscape orientation. ILI9341 is the default. Select ST7789V
 with ``-DAPP_XUH_PLAYER_LCD_CONTROLLER=ST7789V`` when configuring CMake, or ILI9341 with
 ``-DAPP_XUH_PLAYER_LCD_CONTROLLER=ILI9341``. The controller choice applies to all
@@ -107,6 +111,7 @@ Features
 * Endpoint-level USB transfer interface
 * Device enumeration, reporting the interfaces and endpoints of the device
 * Read-only mass storage class driver, with optional FatFs disk functions
+* Basic USB mass storage example
 * Example USB mass storage video player application
 * Support for mass storage devices with filesystem access (provided by FatFs)
 
@@ -117,7 +122,7 @@ Known issues
 * USB support is experimental. Transfers can block indefinitely; disconnect
   detection, timeouts and recovery are incomplete.
 * NYET responses to OUT transfers are not handled. Full-speed and low-speed
-  devices are not supported by the example.
+  devices are not supported.
 * The transport performs at most one transaction per microframe.
 * One device is enumerated, after reset. A device attached later, or
   re-attached, is not detected.
@@ -145,8 +150,8 @@ Required libraries (dependencies)
 *********************************
 
 The library depends on ``lib_xud``. ``lib_fatfs`` is needed only by applications
-that set ``XUH_MSC_FATFS``. The mass-storage example also uses
-``lib_logging`` and ``lib_fatfs``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
+that set ``XUH_MSC_FATFS``, as both examples do. The video player also uses
+``lib_logging``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
 for its selected playback configuration. Versions are pinned in
 ``lib_xuh/lib_build_info.cmake`` and ``examples/deps.cmake``.
 

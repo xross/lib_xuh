@@ -151,6 +151,16 @@ activity (``XUH_ACTIVITY_ENUMERATE``, ``XUH_ACTIVITY_MSC_OPEN``,
 The callback runs in the host task and must not call back into the library.
 ``XUH_ACTIVITY_CALLBACK`` lets the tools account for its stack.
 
+Examples
+========
+
+``examples/app_xuh_msc`` is a complete, minimal application of the calls above:
+it prints the description of the attached device, mounts a mass storage volume,
+lists the root directory and prints the first ``.TXT`` file in it.
+
+``examples/app_xuh_player`` is a video player that reads MJPEG or MPEG-1 files
+from mass storage; see its own guide in ``examples/app_xuh_player/doc``.
+
 Configuration
 =============
 
