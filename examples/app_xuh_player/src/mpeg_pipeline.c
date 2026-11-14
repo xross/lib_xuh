@@ -10,6 +10,7 @@
 #include "mpeg.h"
 #include "mpeg_rgb565.h"
 #include "fps_overlay.h"
+#include "audio_meter.h"
 #include "frame_timing.h"
 
 #if APP_XUH_PLAYER_FRAME_TIMING
@@ -280,6 +281,9 @@ static void receive_play(chanend c_image, chanend c_render)
 #if APP_XUH_PLAYER_FPS_OVERLAY
     fps_overlay_t fps = {0};    /* Per play: the first window restarts with it. */
 #endif
+#if AUDIO_METER_ENABLED
+    audio_meter_t meter = {{0}};
+#endif
     for (;;) {
         unsigned sequence = chanend_in_word(c_image);
         unsigned width = chanend_in_word(c_image);
@@ -329,6 +333,9 @@ static void receive_play(chanend c_image, chanend c_render)
 #if APP_XUH_PLAYER_FPS_OVERLAY
         fps.target_tenths = rate_tenths;
         fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
+#endif
+#if AUDIO_METER_ENABLED
+        audio_meter_frame(&meter, lcd_frames[slot]);
 #endif
 #if PIPELINE_VERIFY
         lcd_hash[slot] = hash_bytes(lcd_frames[slot], sizeof(lcd_frames[slot]));

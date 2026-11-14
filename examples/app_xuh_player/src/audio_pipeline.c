@@ -4,6 +4,7 @@
 #include <xcore/hwtimer.h>
 #include "jpeg_pipeline.h"
 #include "mpeg_audio.h"
+#include "audio_meter.h"
 
 /* The MP2 decoder is lib_mpeg's; this task owns its memory. */
 static unsigned char audio_memory[MPEG_AUDIO_MEMORY_SIZE] __attribute__((aligned(8)));
@@ -45,6 +46,21 @@ void audio_pipeline_stop(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
     pipeline_receive(channel, stats, AUDIO_STATS_WORDS);
 }
 
+#if AUDIO_METER_ENABLED
+/* Peak magnitude of each channel of one decoded block, for the on-screen meter. */
+static void publish_levels(const float *samples)
+{
+    float peak[2] = {0, 0};
+    for (unsigned i = 0; i < 2 * MPEG_AUDIO_FRAME_SAMPLES; i += 2) {
+        float left = samples[i] < 0 ? -samples[i] : samples[i];
+        float right = samples[i + 1] < 0 ? -samples[i + 1] : samples[i + 1];
+        if (left > peak[0]) peak[0] = left;
+        if (right > peak[1]) peak[1] = right;
+    }
+    audio_meter_publish(audio_meter_level(peak[0]), audio_meter_level(peak[1]));
+}
+#endif
+
 /* PL_MPEG exposes generic load/seek callbacks even though this bounded memory
  * adapter never installs them. Bound the otherwise unresolved call graph;
  * includes the 1-KiB payload and the synthesis transform's scalar scratch. */
@@ -60,6 +76,9 @@ void mp2_audio_task(chanend channel)
             mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
         pipeline_send(channel, &result, 1);
         if (result) ++stats[AUDIO_ERRORS];
+#if AUDIO_METER_ENABLED
+        audio_meter_publish(0, 0);
+#endif
         for (;;) {
             unsigned operation = chanend_in_word(channel);
             unsigned bytes = chanend_in_word(channel);
@@ -89,6 +108,9 @@ void mp2_audio_task(chanend channel)
                         unsigned bits;
                         memcpy(&bits, frame.samples + 2 * MPEG_AUDIO_FRAME_SAMPLES - 1, sizeof(bits));
                         stats[AUDIO_CHECKSUM] = (stats[AUDIO_CHECKSUM] * 33) ^ bits;
+#if AUDIO_METER_ENABLED
+                        publish_levels(frame.samples);
+#endif
                     }
                     stats[AUDIO_DECODE_US] += (get_reference_time() - start) / 100;
                     if (next < 0) ++stats[AUDIO_ERRORS];
@@ -105,6 +127,9 @@ void mp2_audio_task(chanend channel)
             stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
             mpeg_audio_close();
         }
+#if AUDIO_METER_ENABLED
+        audio_meter_publish(0, 0);
+#endif
         pipeline_send(channel, stats, AUDIO_STATS_WORDS);
     }
 }

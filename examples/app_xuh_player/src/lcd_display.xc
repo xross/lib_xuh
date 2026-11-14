@@ -8,6 +8,7 @@
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
 #include "fps_overlay.h"
+#include "audio_meter.h"
 
 #define LCD_WIDTH        PIPELINE_LCD_WIDTH
 #define LCD_HEIGHT       PIPELINE_LCD_HEIGHT
@@ -308,6 +309,21 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
                     spi.transfer_array((const uint8_t *)(buffer +
                         ((FPS_OVERLAY_Y + y) * LCD_WIDTH + FPS_OVERLAY_X) * 2),
                         null, FPS_OVERLAY_WIDTH * 2);
+                spi.end_transaction(0);
+            }
+#endif
+#if AUDIO_METER_ENABLED
+            /* As for the FPS gauge: the meter's rectangle is fixed on screen. */
+            if (window.x > AUDIO_METER_X || window.y > AUDIO_METER_Y ||
+                window.x + window.width < AUDIO_METER_X + AUDIO_METER_WIDTH ||
+                window.y + window.height < AUDIO_METER_Y + AUDIO_METER_HEIGHT) {
+                lcd_begin_window(spi, AUDIO_METER_X, AUDIO_METER_Y,
+                                 AUDIO_METER_X + AUDIO_METER_WIDTH - 1,
+                                 AUDIO_METER_Y + AUDIO_METER_HEIGHT - 1);
+                for (unsigned y = 0; y < AUDIO_METER_HEIGHT; ++y)
+                    spi.transfer_array((const uint8_t *)(buffer +
+                        ((AUDIO_METER_Y + y) * LCD_WIDTH + AUDIO_METER_X) * 2),
+                        null, AUDIO_METER_WIDTH * 2);
                 spi.end_transaction(0);
             }
 #endif

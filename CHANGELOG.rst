@@ -9,6 +9,8 @@ UNRELEASED
   * REMOVED: The player's ``TEST.TXT`` read and its JPEG decode benchmark, with
     the single-image LCD path and BMP writer only they used, and the
     ``APP_XUH_PLAYER_ENABLE_LCD`` option: the player always has a display
+  * ADDED: Stereo audio level meter in the top-right of the player's display,
+    in the ``mpeg1_audio`` configuration
   * CHANGED: The player FPS gauge uses the MPEG sequence-header rate for its
     target tick; measured playback throughput remains separate
   * ADDED: Centred smaller MPEG pictures in the storage example, with a fixed

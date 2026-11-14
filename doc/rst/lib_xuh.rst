@@ -308,6 +308,9 @@ benchmark configuration:
    * - ``APP_XUH_PLAYER_AUDIO_DECODE``
      - ``ON``
      - In ``mpeg1_audio``, decode MP2; ``OFF`` measures demux/I/O only
+   * - ``APP_XUH_PLAYER_AUDIO_METER``
+     - ``ON``
+     - In ``mpeg1_audio``, draw a stereo level meter for the decoded audio
    * - ``APP_XUH_PLAYER_MPEG_FILE``
      - Empty
      - Override the MPEG root filename; the defaults remain configuration-specific
@@ -412,6 +415,16 @@ sits above a 96-pixel-wide bar, with four black rows before a centred
 320 x 180 picture. If the
 picture does not cover the gauge, its fixed rectangle is refreshed separately;
 black borders do not otherwise consume recurring transfer bandwidth.
+
+In ``mpeg1_audio`` a stereo level meter mirrors the gauge in the top-right
+corner, in the fixed rectangle (212, 4) through (315, 25), refreshed in the same
+way. Its left and right bars grow from the right-hand edge towards the centre of
+the screen on a 48-dB logarithmic scale, 11 pixels for each halving of the peak
+level: green when quiet, through amber, to red at full scale. Each bar rises
+at once, falls two pixels a frame and carries a white peak-hold tick. The audio
+task publishes the peak of each decoded MP2 block to the display task, on the
+same tile, without a channel. The audio is still neither played nor synchronised
+with the video: the meter shows the level of the audio most recently decoded.
 
 For MPEG, the white tick marks the nominal frame rate read from the stream's
 sequence header, rounded to tenths for display positioning. The bar's colour
@@ -722,8 +735,8 @@ The native JPEG-reader and activity-LED tests are registered in the native suite
 above. Their simulated or host results do not validate physical USB, LCD signal
 integrity or LED polarity.
 ``PIPELINE_VERIFY=1`` enables development-only frame-integrity hashes; leave it
-disabled for throughput measurements and disable the FPS overlay when comparing
-unmodified frame hashes.
+disabled for throughput measurements and disable the FPS overlay and the audio
+meter when comparing unmodified frame hashes.
 
 Sampled profiling
 -----------------
@@ -747,7 +760,7 @@ Limitations
 
 * Playback has no pacing, seeking, arbitrary resolution changes, audio output or
   A/V synchronisation. The FPS overlay is a smoothed staging rate, not a deadline
-  monitor.
+  monitor. The audio meter shows decoded level, not something that is heard.
 * USB support is experimental. Transfers can block indefinitely; disconnect,
   timeout/recovery and general device compatibility are incomplete.
 * MPEG input is trusted, not hardened against arbitrary malformed media.
