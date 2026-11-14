@@ -30,10 +30,11 @@ The ``lib_xuh`` module provides the USB host transport, a host core that
 enumerates the attached device and describes it to the application, and a
 read-only mass storage class driver with optional FatFs disk functions.
 
-There are two examples for XK-EVK-XU316: ``app_xuh_msc``, a basic mass storage
-example that lists a directory and prints a text file, and ``app_xuh_player``, a
-video player that reads from USB mass storage and renders to an SPI LCD. Both
-are described in the library guide.
+There are three examples for XK-EVK-XU316: ``app_xuh_msc``, a basic mass
+storage example that lists a directory and prints a text file;
+``app_xuh_msc_bench``, which measures mass storage read rates; and
+``app_xuh_player``, a video player that reads from USB mass storage and renders
+to an SPI LCD. All are described in the library guide.
 
 ********
 Features
@@ -43,7 +44,7 @@ Features
 * Endpoint-level USB transfer interface
 * Device enumeration, reporting the interfaces and endpoints of the device
 * Read-only mass storage class driver, with optional FatFs disk functions
-* Basic USB mass storage example
+* Basic USB mass storage example and read-rate benchmark
 * Example USB mass storage video player application
 * Support for mass storage devices with filesystem access (provided by FatFs)
 
@@ -51,19 +52,33 @@ Features
 Known issues
 ************
 
-* USB support is experimental. Transfers can block indefinitely; disconnect
-  detection, timeouts and recovery are incomplete.
-* NYET responses to OUT transfers are not handled. Full-speed and low-speed
-  devices are not supported.
-* The transport performs at most one transaction per microframe.
+* USB support is experimental. Transfers can block indefinitely
+  (`#8 <https://github.com/xross/lib_xuh/issues/8>`__);
+  disconnect detection and recovery are incomplete
+  (`#9 <https://github.com/xross/lib_xuh/issues/9>`__).
+* NYET responses to OUT transfers are not handled
+  (`#10 <https://github.com/xross/lib_xuh/issues/10>`__).
+* Only high-speed devices are supported; full-speed and low-speed devices are
+  not (`#11 <https://github.com/xross/lib_xuh/issues/11>`__).
+* The transport performs at most one transaction per microframe
+  (`#12 <https://github.com/xross/lib_xuh/issues/12>`__).
 * One device is enumerated, after reset. A device attached later, or
-  re-attached, is not detected.
-* Mass storage is read only, uses logical unit 0 and requires 512-byte blocks.
-* The player example has no pacing, audio output or A/V synchronisation. See the
-  library guide for its media, memory and validation limits.
-* No support for USB hubs or OTG. Mass storage is the only class driver; other
-  classes can use the host core and transport directly.
-* Support for high-speed devices only
+  re-attached, is not detected
+  (`#13 <https://github.com/xross/lib_xuh/issues/13>`__).
+* Mass storage is read only
+  (`#14 <https://github.com/xross/lib_xuh/issues/14>`__),
+  uses logical unit 0 only
+  (`#15 <https://github.com/xross/lib_xuh/issues/15>`__)
+  and requires 512-byte blocks
+  (`#16 <https://github.com/xross/lib_xuh/issues/16>`__).
+* The player example has no pacing, audio output or A/V synchronisation
+  (`#17 <https://github.com/xross/lib_xuh/issues/17>`__).
+  See the library guide for its media, memory and validation limits.
+* USB hubs are not supported
+  (`#18 <https://github.com/xross/lib_xuh/issues/18>`__).
+* Mass storage is the only class driver; other classes can use the host core
+  and transport directly
+  (`#20 <https://github.com/xross/lib_xuh/issues/20>`__).
 
 ****************
 Development repo

@@ -4,6 +4,8 @@ lib_xuh change log
 UNRELEASED
 ----------
 
+  * ADDED: ``app_xuh_msc_bench`` example: raw block and FatFs file read rates of
+    a mass storage device
   * CHANGED: The player's ``mpeg1_audio`` configuration plays
     ``VIDEO_320x180.MPG`` by default
   * REMOVED: The player's ``TEST.TXT`` read and its JPEG decode benchmark, with

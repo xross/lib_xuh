@@ -222,6 +222,20 @@ The output has this form::
     ...
     Done
 
+app_xuh_msc_bench
+=================
+
+``examples/app_xuh_msc_bench`` measures how fast the attached mass storage
+device can be read. It reads 4 MiB from the start of the device with
+``XUH_Msc_Read()``, 1, 8 and 64 blocks per command, then the first 4 MiB of the
+largest file in the root directory with FatFs ``f_read()``, 512 bytes, 4 KiB and
+32 KiB at a time, and prints the rate of each in KiB/s. Nothing is written to
+the device. Build and run it as ``app_xuh_msc``, with ``app_xuh_msc_bench`` in
+the paths.
+
+The rates are those of one device on this transport, which performs at most one
+transaction per microframe; they are not a property of the device alone.
+
 app_xuh_player
 ==============
 
