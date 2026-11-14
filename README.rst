@@ -7,8 +7,8 @@ USB Host (XUH) Library
 
 :maintainer: xross
 :version: 0.1.0
-:scope: xmoslabs
-:description: Low-level USB host transport for XMOS devices
+:scope: Experimental
+:description: USB host transport, enumeration and mass storage for XMOS devices
 :category: General purpose
 :keywords:
 :devices: xcore-200, xcore.ai
@@ -26,9 +26,10 @@ This library provides a low-level USB host interface for XMOS XS2 and XS3 based 
 It is intended for applications that need direct access to USB host endpoints and
 transfer control.
 
-The ``lib_xuh`` module provides the USB host transport layer. Applications or
-higher-level class drivers are responsible for device class handling and for
-assigning endpoint usage.
+The ``lib_xuh`` module provides the USB host transport, a host core that
+enumerates the attached device and describes it to the application, and a
+read-only mass storage class driver with optional FatFs disk functions. Usage
+is described in `the library guide <doc/rst/lib_xuh.rst>`_.
 
 The USB mass storage example demonstrates mounting storage media with FatFs and
 reading files from a USB mass storage device. The example supports XK-EVK-XU316
@@ -104,7 +105,10 @@ Features
 
 * Low-level USB host support for XMOS XS2 and XS3 based devices
 * Endpoint-level USB transfer interface
-* Example USB mass storage application
+* Device enumeration, reporting the interfaces and endpoints of the device
+* Read-only mass storage class driver, with optional FatFs disk functions
+* Example USB mass storage video player application
+* Support for mass storage devices with filesystem access (provided by FatFs)
 
 ************
 Known issues
@@ -115,11 +119,14 @@ Known issues
 * NYET responses to OUT transfers are not handled. Full-speed and low-speed
   devices are not supported by the example.
 * The transport performs at most one transaction per microframe.
-* Host enumeration and MSC dispatch are currently coupled to the example;
-  other application types need integration work. FatFs is used for filesystem
-  access, while playback, LCD and audio handling are example-specific.
+* One device is enumerated, after reset. A device attached later, or
+  re-attached, is not detected.
+* Mass storage is read only, uses logical unit 0 and requires 512-byte blocks.
 * The player has no pacing, audio output or A/V synchronisation. See the pipeline
   guide for media, memory and validation limits.
+* No support for USB hubs or OTG. Mass storage is the only class driver; other
+  classes can use the host core and transport directly.
+* Support for high-speed devices only
 
 ****************
 Development repo
@@ -137,7 +144,8 @@ Required tools
 Required libraries (dependencies)
 *********************************
 
-The transport depends on ``lib_xud``. The mass-storage example also uses
+The library depends on ``lib_xud``. ``lib_fatfs`` is needed only by applications
+that set ``XUH_MSC_FATFS``. The mass-storage example also uses
 ``lib_logging`` and ``lib_fatfs``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
 for its selected playback configuration. Versions are pinned in
 ``lib_xuh/lib_build_info.cmake`` and ``examples/deps.cmake``.

@@ -4,8 +4,16 @@
 
 #include <xccompat.h>
 
+/* USB host transport: the host controller task and single-packet transfers.
+ * See xuh_host.h for device enumeration and control transfers, and xuh_msc.h
+ * for mass storage. */
+
+/* Handle to one channel slot. A tile-local pointer: use it on the tile that
+ * runs XUH_Manager(). */
 typedef unsigned int XUH_Ep;
 
+/* Host controller. Runs forever on its own logical core. Slot 0 in each
+ * direction is the default control endpoint. */
 void XUH_Manager(chanend epChans_out[], unsigned epChanCount_out,
                  chanend epChans_in[], unsigned epChanCount_in);
 

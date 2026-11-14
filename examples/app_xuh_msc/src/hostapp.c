@@ -1,148 +1,33 @@
-
-#include <xccompat.h>
 #include <stdio.h>
 
-#include "usb_defs.h"
-#include "xuh.h"
-#include "usbh_descriptors.h"
-#include "usb_std_descriptors.h" // DescCOmp return only TODO RM me
+#include "xuh_host.h"
+#include "xuh_msc.h"
+#include "activity_led.h"
+#include "hostapp.h"
 
-#include "usbh.h"
-#include "usbh_class_msc.h"
-
-#ifdef DEBUG
-#include "usbh_dbgdescs.h"
-#endif
-
-#include <print.h>
-
-
-#if 1
-//FIXME remove me
-/* Table 9-5. Descriptor Types */
-#define USB_DEVICE                      0x01
-#define USB_CONFIGURATION               0x02
-#define USB_STRING                      0x03
-#define USB_INTERFACE                   0x04
-#define USB_ENDPOINT                    0x05
-#define USB_DEVICE_QUALIFIER            0x06
-#define USB_OTHER_SPEED_CONFIGURATION   0x07
-#define USB_INTERFACE_POWER             0x08
-#endif
-
-// TODO move to shared location */
-/* wValue for Get Descriptor (indicates required descriptor)
- * Note: top byte used only
- */
-#define USB_WVALUE_GETDESC_DEV          (USB_DEVICE << 8)
-#define USB_WVALUE_GETDESC_CONFIG       (USB_CONFIGURATION << 8)
-#define USB_WVALUE_GETDESC_STRING       (USB_STRING << 8)
-#define USB_WVALUE_GETDESC_INTER        (USB_INTERFACE << 8)
-#define USB_WVALUE_GETDESC_DEVQUAL      (USB_DEVICE_QUALIFIER << 8)
-#define USB_WVALUE_GETDESC_OSPEED_CFG   (USB_OTHER_SPEED_CONFIGURATION << 8)
-
-
-#define USB_DUMMY_DESCS_HID 1
-
-#define MAX_EP0_PKT_SIZE 64
-
-#define DEV_ADDR 3
-#define USBH_CLASS_MSC 1
-
-static USBH_Driver_t const usbh_class_drivers[USB_CLASS_MAPPED_INDEX_END] =
-{
-#if (USB_CLASS_MSC)
-    [USB_CLASS_MSC] = {
-        .init                       = USBH_MSC_Init,
-        .DescComp_InterfaceEndpoint   = USBH_MSC_DescComp_NextInterfaceEp,
-        .DescComp_Interface     = USBH_MSC_DescComp_NextInterface,
-        //.task = USBH_MSC_Main,
-    },
-#endif
-
-};
-
-void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
+/* In msctest.c: mount the volume and play from it. */
+void MassStorageApp(
 #if APP_XUH_MSC_ENABLE_LCD
-                 , chanend c_lcd_image
-#endif
+                    chanend c_lcd_image
 #if APP_XUH_MSC_MPEG_AUDIO
-                 , chanend c_audio
+                    , chanend c_audio
 #endif
-                 );
+#elif APP_XUH_MSC_MPEG_AUDIO
+                    chanend c_audio
+#else
+                    void
+#endif
+                    );
 
-void delay(unsigned x);
-
-void UnUnicode(unsigned char out[], unsigned char in[], int length)
+/* lib_xuh reports what it is doing on the bus: show it on the LED. */
+XUH_ACTIVITY_CALLBACK static void usb_activity(XUH_Activity activity)
 {
-    int j, i;
-    for(i = 2, j = 0; i < length; i+=2, j+=1)
-    {
-        out[j] = in[i];
-    }
+    activity_led_usb(activity == XUH_ACTIVITY_IDLE ? 0 :
+                     activity == XUH_ACTIVITY_ERROR ? ACTIVITY_LED_ERROR :
+                                                      ACTIVITY_LED_BUSY);
 }
 
-static inline void USB_GetNextDescriptor(unsigned short* const BytesRem, void** CurrConfigLoc)
-{
-    unsigned short CurrDescriptorSize = (*((USB_Descriptor_Header_t*)(*CurrConfigLoc))).bLength;
-
-    unsigned char *x  = *CurrConfigLoc;
-
-    if (*BytesRem < CurrDescriptorSize)
-    {
-        CurrDescriptorSize = *BytesRem;
-        printhexln(CurrDescriptorSize);
-    }
-
-    *CurrConfigLoc  = (void*)((unsigned)*CurrConfigLoc + CurrDescriptorSize);
-    *BytesRem      -= CurrDescriptorSize;
-}
-
-
-#define DESCRIPTOR_SEARCH_NotFound 0
-#define DESCRIPTOR_SEARCH_Fail 1
-
-USB_DescSearchResult_t USB_GetNextDescriptorComp(unsigned * const BytesRem,
-                                  void** const CurrConfigLoc, // buffer
-                                  unsigned const (*comparatorFunc)(void*)) /* Function ptr to desc compare func */
-{
-    USB_DescSearchResult_t returnVal;
-
-    while (*BytesRem)
-    {
-        unsigned char *PrevDescLoc  = *CurrConfigLoc;
-        uint16_t PrevBytesRem = *BytesRem;
-
-        USB_GetNextDescriptor(BytesRem, CurrConfigLoc);
-
-        /* Inspect current descriptor */
-        returnVal = comparatorFunc(*CurrConfigLoc);
-        {
-
-
-            // The following is returned if another interface is found before the EP
-            // TODO do this interface check at this level?
-            if (returnVal == USB_DESCSEARCH_FAIL)
-            {
-                printstrln("FAIL");
-                //*CurrConfigLoc = PrevDescLoc;
-                //*BytesRem      = PrevBytesRem;
-            }
-            /* Match */
-           // printstr("GetNextDescComp: found\n");
-
-            //USB_GetNextDescriptor(BytesRem, CurrConfigLoc);
-            return returnVal;
-        }
-        /* Move on to next Desc */
-
-    }
-
-    /* No match! */
-    return USB_DESCSEARCH_FAIL;
-}
-
-void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
+void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in
 #if APP_XUH_MSC_ENABLE_LCD
              , chanend c_lcd_image
 #endif
@@ -151,183 +36,45 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
 #endif
              )
 {
-    USB_BmRequestType_t bmRequestType;
-    USB_SetupPacket_t sp;
-    unsigned char buffer[1024];
-    unsigned char spBuffer[MAX_EP0_PKT_SIZE];
-    int length;
-    int tmp;
-    unsigned bulk_out = 0, bulk_in = 0;
+    static XUH_Host host;
+    static XUH_Device device;
+    static XUH_Msc msc;
+    XUH_Status status;
 
-    USB_Descriptor_Device_t deviceDesc;
-    USB_Descriptor_String_t productStringDesc;
+    /* Slot 0 in each direction is the control endpoint; the rest are for
+     * class drivers. */
+    XUH_Host_Init(&host, c_out[0], c_in[0], &c_out[1], n_out - 1, &c_in[1], n_in - 1);
+    XUH_Host_SetActivityCallback(&host, usb_activity);
 
-#ifndef DEBUG
-    XUH_Ep ep_out = XUH_InitEp(c_out);
-    XUH_Ep ep_out2 = XUH_InitEp(c_out2);
-    XUH_Ep ep_in = XUH_InitEp(c_in);
-    XUH_Ep ep_in1 = XUH_InitEp(c_in1);
+    /* lib_xuh enumerates one device after reset: a second
+     * XUH_Host_WaitForDevice() fails, which ends this loop. */
+    while ((status = XUH_Host_WaitForDevice(&host, &device)) == XUH_OK) {
+        printf("USB: device %04x:%04x, %u interface(s)\n",
+               device.vendorId, device.productId, device.interfaceCount);
 
-    delay(30000000);
-
-    /* Get first 8 bbytes of device desciptor */
-    length =  XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_DEV, 8,  0);
-
-    /* Set device address - sends request to device and sets it in XUH */
-    XUH_SetAddress(ep_out, ep_in, DEV_ADDR);
-
-    /* Get the rest of the device desciptor */
-    length = XUH_GetDescriptor(ep_out, ep_in, (unsigned char*) &deviceDesc,  USB_WVALUE_GETDESC_DEV, 64, 0);
-
-    /* Get product string */
-    tmp = deviceDesc.iProduct;
-    length = XUH_GetDescriptor(ep_out, ep_in, (unsigned char*) &productStringDesc,  USB_WVALUE_GETDESC_STRING | tmp, 64, 0);
-    length = XUH_GetDescriptor(ep_out, ep_in, (unsigned char*) &productStringDesc,  USB_WVALUE_GETDESC_STRING | 3, 64, 0);
-
-#if 0
-    printstr("Found device: ");
-    UnUnicode(buffer, (unsigned char*) &productStringDesc, productStringDesc.bLength);
-    for(int i = 0; i < productStringDesc.bLength/2-1; i++)
-        printchar(productStringDesc.bString[i]);
-
-#endif
-#endif
-
-    /* Get Config Descriptor header */
-    unsigned short configHeader[sizeof(USB_Descriptor_Configuration_Header_t)];
-
-#ifndef DEBUG
-    length = XUH_GetDescriptor(ep_out, ep_in, configHeader,  USB_WVALUE_GETDESC_CONFIG, sizeof(USB_Descriptor_Configuration_Header_t), 0);
-    //printintln(configHeader[offsetof(USB_Descriptor_Configuration_Header_t, bMaxPower)]);
-#endif
-
-    unsigned *configSizePtr = ((USB_Descriptor_Configuration_Header_t*)configHeader)->wTotalLength;
-
-#if defined(DEBUG) && (USB_DUMMY_DESCS_HID == 1)
-    for(int i = 0; i < sizeof(dummyConfigDesc_MSC); i++)
-        buffer[i] = dummyConfigDesc_MSC[i];
-
-    configSizePtr = sizeof(dummyConfigDesc_MSC);
-#else
-    /* Get the rest of the Config Descriptor */
-    XUH_GetDescriptor(ep_out, ep_in, buffer,  USB_WVALUE_GETDESC_CONFIG, configSizePtr, 0);
-#endif
-
-    /* PARSE CONFIG DESC FOR EP ADDRESS */
-
-    /* - Run though descirptors.
-     * - Try and match with class drivers in array (call desc comp function in class struct)
-     *      - Pass in a "device accepted" flag to signal we are happy with the dev (and stop parse)
-     * - If match then:
-     *      - SetConfig
-     *      - Run User function (pass in user eps)
-     *
-     */
-    {
-        unsigned devAccepted = 0;
-        USB_DescSearchResult_t result;
-        USB_Descriptor_Interface_t* interface = NULL;
-
-        unsigned char *buffPtr = buffer;
-
-        while(!devAccepted)
-        {
-            /* Get the next EP desc */
-            /* TODO Use DescComp func from drivers array */
-            /* Get the next Endpoint desc */
-
-            if(!(interface) ||
-                    ((result = USB_GetNextDescriptorComp(&configSizePtr, &buffPtr,
-                    USBH_MSC_DescComp_NextInterfaceEp)) < 0))//!= USB_DESCSEARCH_MATCH)) // or ACCEPT
-            {
-                /* Find next MSC interface.. */
-                if(USB_GetNextDescriptorComp(&configSizePtr, &buffPtr,  USBH_MSC_DescComp_NextInterface) != USB_DESCSEARCH_MATCH)
-                {
-                    printstr("End of desciptors hit\n");
-                    break;
-                }
-
-                /* Update interface */
-			    interface = (USB_Descriptor_Interface_t*) buffPtr;
-                bulk_out = bulk_in = 0;
-
-                // TODO:    Save Ep Data to an array or similar (to pass to app EP cores)
-                // TODO:    Need to set devAccepted to 1 at some point! - Pass to NextInterfaceEP?
-                // What if we can accept a device with different endpoint counts (e.g. audio dev could input/output)
-                continue;
-            }
-            else
-            {
-		        USB_Descriptor_Endpoint_t* EndpointDesc = (USB_Descriptor_Endpoint_t*)buffPtr;
-                /* Channel slots need not match the device's endpoint numbers. */
-                if (EndpointDesc->bEndpointAddress & USB_EPDIR_MASK)
-                    bulk_in = EndpointDesc->bEndpointAddress;
-                else
-                    bulk_out = EndpointDesc->bEndpointAddress;
-                /* Found an EP! Retrieve the endpoint address from the endpoint descriptor */
-                //printstr("Found ep at addr: ");
-                //printhexln(EndpointDesc->bEndpointAddress);
-
-                if(result == USB_DESCSEARCH_ACCEPT)
-                {
-                    //printstr("Accepting Device\n");
-                    devAccepted = 1;
-                }
-            }
-        }
-
-        if(devAccepted)
-        {
-            //printstrln("Enumerating dev. Doing a SetConfig()!");
-        }
-        else
-        {
-            /* Couldn't enum device. */
-            /* TODO need to wait for a new device */
-            while(1);
-        }
-    }
-
-    //TODO Assign addreses to the EP resources
-
-
-#if 1
-//#ifndef DEBUG
-    /* Set Config() */
-    bmRequestType.Recipient = USB_BM_REQTYPE_RECIP_DEV;
-    bmRequestType.Type = USB_BM_REQTYPE_TYPE_STANDARD;
-    bmRequestType.Direction = USB_BM_REQTYPE_DIRECTION_H2D;
-
-    sp.bmRequestType = bmRequestType;
-    sp.bRequest = USB_SET_CONFIGURATION;
-    sp.wValue = 1;
-    sp.wIndex = 0;
-    sp.wLength = 0;
-
-    USB_ComposeSetupBuffer(sp, spBuffer);
-
-    XUH_SetupTransfer(ep_out, spBuffer);
-
-    length = XUH_InTransfer(ep_in, buffer);
-    if (XUH_SetEndpointAddress(ep_out2, bulk_out) ||
-        XUH_SetEndpointAddress(ep_in1, bulk_in)) {
-        printf("USB: configuration/endpoint binding failed\n");
-        return;
-    }
-    printf("USB: bulk OUT=0x%02x IN=0x%02x\n", bulk_out, bulk_in);
-
-    /* Device kinda up and running now.. lets try and do some mass storage stuff... */
-
-    //TODO call the right func based on device!!
-    MassStorage(ep_out, ep_in, ep_out2, ep_in1
+        status = XUH_Msc_Open(&msc, &host, &device);
+        if (status == XUH_OK) {
+            /* A mass storage device: it is now FatFs drive 0. */
+            printf("USB: mass storage, %u blocks of %u bytes\n",
+                   (unsigned)msc.blockCount, (unsigned)msc.blockSize);
+            MassStorageApp(
 #if APP_XUH_MSC_ENABLE_LCD
-                 , c_lcd_image
-#endif
+                           c_lcd_image
 #if APP_XUH_MSC_MPEG_AUDIO
-                 , c_audio
+                           , c_audio
 #endif
-                 );
+#elif APP_XUH_MSC_MPEG_AUDIO
+                           c_audio
 #endif
+                           );
+        } else if (status == XUH_ERR_UNSUPPORTED) {
+            printf("USB: not a supported mass storage device\n");
+        } else {
+            printf("USB: mass storage open failed, status=%d\n", status);
+        }
+    }
+    if (status != XUH_ERR_UNSUPPORTED)
+        printf("USB: enumeration failed, status=%d\n", status);
 
-    while(1);
+    while (1);
 }

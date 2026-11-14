@@ -4,7 +4,7 @@
 #include <print.h>
 
 #include "xuh.h"
-#include "usbh.h"
+#include "hostapp.h"
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
 #include "activity_led.h"
@@ -21,15 +21,6 @@ on tile[0]: out port p_lcd_dc = XS1_PORT_1O;
 on tile[0]: out port p_lcd_rst = XS1_PORT_1P;
 on tile[0]: clock lcd_spi_clock = XS1_CLKBLK_1;
 #endif
-
-/* TODO Move me. */
-void delay(unsigned x)
-{
-    timer t;
-    unsigned time;
-    t :> time;
-    t when timerafter(time + x) :> void;
-}
 
 #define NUM_EPS 3
 
@@ -86,8 +77,7 @@ void main()
 
         on tile[1]:
         {
-            USBHost(xuhChans_out[0], xuhChans_in[0], xuhChans_out[2],
-                    xuhChans_in[1]
+            USBHost(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS
 #if APP_XUH_MSC_ENABLE_LCD
 #if MSC_JPEG_PIPELINE
                     , c_jpeg_load
