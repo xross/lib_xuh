@@ -1,4 +1,3 @@
-
 #if defined(APP_XUH_MSC_PROFILE_SILENT) && APP_XUH_MSC_PROFILE_SILENT
 #include <stddef.h>
 #include <syscall.h>

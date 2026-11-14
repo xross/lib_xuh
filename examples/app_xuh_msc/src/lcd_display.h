@@ -1,4 +1,3 @@
-
 #ifndef LCD_DISPLAY_H_
 #define LCD_DISPLAY_H_
 

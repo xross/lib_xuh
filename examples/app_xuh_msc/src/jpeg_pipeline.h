@@ -1,18 +1,8 @@
-
 #ifndef JPEG_PIPELINE_H_
 #define JPEG_PIPELINE_H_
 
 #include <xccompat.h>
-
-#ifndef APP_XUH_MSC_ENABLE_MPEG1
-#define APP_XUH_MSC_ENABLE_MPEG1 0
-#endif
-#if APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_JPEG
-#error Select one video decoder per build configuration
-#endif
-#define MSC_JPEG_PIPELINE (APP_XUH_MSC_ENABLE_JPEG && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
-#define MSC_MPEG_PIPELINE (APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
-#define MSC_VIDEO_PIPELINE (MSC_JPEG_PIPELINE || MSC_MPEG_PIPELINE)
+#include "video_config.h"
 #define PIPELINE_STOP (~0u)
 #define PIPELINE_INPUT_BYTES (512 * 60)
 #define JPEG_INPUT_WIDTH 320
@@ -23,9 +13,6 @@
 #define JPEG_OUTPUT_WIDTH (JPEG_INPUT_WIDTH >> JPEG_DECODE_SCALE)
 #define JPEG_OUTPUT_HEIGHT (JPEG_INPUT_HEIGHT >> JPEG_DECODE_SCALE)
 #define PIPELINE_RGB_BYTES (JPEG_OUTPUT_WIDTH * JPEG_OUTPUT_HEIGHT * 3)
-#define PIPELINE_LCD_WIDTH 320
-#define PIPELINE_LCD_HEIGHT 240
-#define PIPELINE_TICKS_PER_SECOND 100000000u
 
 /* Development-only per-buffer integrity checks during transmit/render.
  * Disabled for timing runs; enable with -DPIPELINE_VERIFY=1. */

@@ -1,8 +1,8 @@
 # Common dependencies for examples. Use explicit owners for non-XMOS modules.
 set(APP_DEPENDENT_MODULES   "lib_logging(3.3.2)"
                             "lib_xuh"
-                            "https://github.com/xross/lib_fatfs(cc154623a90b710caa2a80c8955600f9e00b61dc)"
+                            "https://github.com/xross/lib_fatfs(7793c9c5a7df6ed184f785568bc7a9a86b234d0b)"
 )
-set(XUH_JPEG_DEPENDENCY "git@github.com:xmos/lib_jpeg(44fcc11c8a8d64f0cdf65dfeb584cd20f3476a1c)")
+set(XUH_JPEG_DEPENDENCY "git@github.com:xmos/lib_jpeg(b515df327d287e3444e8d3cc01642d65d90691ae)")
 set(XUH_SPI_DEPENDENCY "lib_spi(4.0.0)")
-set(XUH_MPEG_DEPENDENCY "git@github.com:xross/lib_mpeg(00ac9285853414b18c1107c104915a1aba973906)")
+set(XUH_MPEG_DEPENDENCY "git@github.com:xross/lib_mpeg(51e6bfecaa645198abf07946e530b4b85eeff946)")

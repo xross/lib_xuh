@@ -66,6 +66,9 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
 #if APP_XUH_MSC_ENABLE_LCD
                  , chanend c_lcd_image
 #endif
+#if APP_XUH_MSC_MPEG_AUDIO
+                 , chanend c_audio
+#endif
                  );
 
 void delay(unsigned x);
@@ -142,6 +145,9 @@ USB_DescSearchResult_t USB_GetNextDescriptorComp(unsigned * const BytesRem,
 void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
 #if APP_XUH_MSC_ENABLE_LCD
              , chanend c_lcd_image
+#endif
+#if APP_XUH_MSC_MPEG_AUDIO
+             , chanend c_audio
 #endif
              )
 {
@@ -315,9 +321,12 @@ void USBHost(chanend c_out, chanend c_in, chanend c_out2, chanend c_in1
     //TODO call the right func based on device!!
     MassStorage(ep_out, ep_in, ep_out2, ep_in1
 #if APP_XUH_MSC_ENABLE_LCD
-                , c_lcd_image
+                 , c_lcd_image
 #endif
-                );
+#if APP_XUH_MSC_MPEG_AUDIO
+                 , c_audio
+#endif
+                 );
 #endif
 
     while(1);

@@ -10,13 +10,26 @@
 #include "mpeg.h"
 #include "mpeg_rgb565.h"
 #include "fps_overlay.h"
+#include "frame_timing.h"
+
+#if APP_XUH_MSC_FRAME_TIMING
+static void report_frame_timing(const char *name, const frame_timing_t *timing)
+{
+    printf("MPEG timing %s: count=%u min=%u p50_le=%u p95_le=%u p99_le=%u max=%u over_40ms=%u\n",
+           name, timing->count, timing->min_us,
+           frame_timing_percentile(timing, 50), frame_timing_percentile(timing, 95),
+           frame_timing_percentile(timing, 99), timing->max_us, timing->over_40ms);
+}
+#endif
 
 /* Tile 1: two filesystem input chunks (one being read ahead while the other is
- * fed), plus lib_mpeg's static arena.
+ * fed), plus the memory passed to lib_mpeg.
  * Tile 0: two RGB565 framebuffers and one two-row YUV strip. No RGB888 frame. */
 static unsigned char input[2][MPEG_LOAD_BYTES] __attribute__((aligned(4)));
 static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2] __attribute__((aligned(4)));
 static unsigned strip[PIPELINE_LCD_WIDTH * 3 / 4];
+/* Decoder memory, owned by the decode task's tile and passed to mpeg_open(). */
+static unsigned char video_memory[MPEG_VIDEO_MEMORY_SIZE] __attribute__((aligned(8)));
 typedef unsigned __attribute__((may_alias)) plane_word_t;
 #if PIPELINE_VERIFY
 static unsigned lcd_hash[2];
@@ -103,14 +116,26 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         unsigned held = 0, held_sequence = 0, remaining = 0;
         const unsigned char *chunk = NULL;
         unsigned stats[MPEG_STATS_WORDS] = {0};
-        mpeg_result_t result = mpeg_open();
+        mpeg_result_t result = mpeg_open(video_memory, sizeof(video_memory));
         int opened = result >= 0;
+#if APP_XUH_MSC_FRAME_TIMING
+        frame_timing_t decode_timing = {.count = 0}, service_timing = {.count = 0};
+        unsigned frame_decode_ticks = 0, previous_ack = 0;
+#endif
         while (result >= 0) {
             mpeg_frame_t frame;
             unsigned start = get_reference_time();
             activity_led_decode(ACTIVITY_LED_BUSY);
             result = mpeg_next(&frame);
+#if APP_XUH_MSC_FRAME_TIMING
+            unsigned decode_ticks = get_reference_time() - start;
+            decode_us += decode_ticks / 100;
+            /* A frame may require several next/feed cycles. Sum decode work,
+             * not just the final next() call, excluding input/feed/handoff. */
+            frame_decode_ticks += decode_ticks;
+#else
             decode_us += (get_reference_time() - start) / 100;
+#endif
             activity_led_decode(result < 0 ? ACTIVITY_LED_ERROR : 0);
             if (result == MPEG_FRAME) {
                 /* Fixed full-screen protocol; reject before publishing a frame. */
@@ -120,6 +145,15 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 start = get_reference_time();
                 send_frame(c_image, &frame, &send_us, &ack_wait_us);
                 transfer_us += (get_reference_time() - start) / 100;
+#if APP_XUH_MSC_FRAME_TIMING
+                unsigned acknowledged = get_reference_time();
+                frame_timing_add(&decode_timing, frame_decode_ticks / 100);
+                frame_decode_ticks = 0;
+                /* Service period includes input/feed/decode/handoff and LCD
+                 * backpressure. Exclude startup; this is not an LCD timestamp. */
+                if (decoded) frame_timing_add(&service_timing, (acknowledged - previous_ack) / 100);
+                previous_ack = acknowledged;
+#endif
                 ++decoded;
             } else if (result == MPEG_NEED_INPUT) {
                 if (!remaining) {
@@ -207,6 +241,11 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         stats[MPEG_ACK_WAIT_US] = ack_wait_us;
         stats[MPEG_DECODED_FRAMES] = decoded;
         stats[MPEG_DECODE_STATUS] = (unsigned)result;
+#if APP_XUH_MSC_FRAME_TIMING
+        /* All rendering has drained. Never print per-frame or inside decode. */
+        report_frame_timing("decode", &decode_timing);
+        report_frame_timing("service", &service_timing);
+#endif
         pipeline_send(c_load, stats, MPEG_STATS_WORDS);
     }
 }

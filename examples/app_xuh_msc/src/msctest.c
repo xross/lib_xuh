@@ -2,7 +2,6 @@
 #include <print.h>
 #include <xcore/chanend.h>
 #include <xcore/hwtimer.h>
-#include "gpioDefines.h"
 
 #include "usb_std_requests.h"
 #include "usb_defs.h"
@@ -19,7 +18,6 @@
 
 #include "timing.h"
 
-unsigned int get_time(void);
 #include "diskio.h"
 
 #include "msc_support.h"
@@ -28,6 +26,10 @@ unsigned int get_time(void);
 #include "mjpeg_reader.h"
 #include "video_loader.h"
 #include "activity_led.h"
+#include "audio_pipeline.h"
+#if APP_XUH_MSC_MPEG_AUDIO
+#include "mpeg_ps_reader.h"
+#endif
 
 #define MSC_WORD_ALIGNED __attribute__((aligned(4)))
 
@@ -583,17 +585,58 @@ static void run_jpeg_pipeline(chanend c_load)
 /* FatFs-backed source for the shared loader: one unit is one stream chunk. */
 static FIL mpeg_file;
 static unsigned long long mpeg_bytes;
+#if APP_XUH_MSC_MPEG_AUDIO
+static mpeg_ps_reader_t mpeg_ps;
+static chanend mpeg_audio_channel;
+static unsigned audio_stats[AUDIO_STATS_WORDS];
+#define MPEG_FILE_NAME "VIDEO.MPG"
+
+PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data,
+                                            unsigned capacity, unsigned *bytes)
+{
+    UINT count = 0;
+    FRESULT rc = f_read((FIL *)context, data, capacity, &count);
+    *bytes = count;
+    return rc;
+}
+
+PS_AUDIO_CALLBACK static int mpeg_ps_audio_send(void *context,
+                                               const unsigned char *data, unsigned bytes)
+{
+    return audio_pipeline_send(*(chanend *)context, data, bytes);
+}
+#else
+#define MPEG_FILE_NAME "VIDEO.M1V"
+#endif
 
 VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
 {
     (void)context;
     mpeg_bytes = 0;
-    return f_open(&mpeg_file, "VIDEO.M1V", FA_READ);
+    int rc = f_open(&mpeg_file, MPEG_FILE_NAME, FA_READ);
+#if APP_XUH_MSC_MPEG_AUDIO
+    memset(audio_stats, 0, sizeof(audio_stats));
+    if (!rc) {
+        mpeg_ps_init(&mpeg_ps, mpeg_ps_disk_read, &mpeg_file);
+        if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_MSC_AUDIO_DECODE)) {
+            audio_pipeline_stop(mpeg_audio_channel, audio_stats);
+            f_close(&mpeg_file);
+            return -1;
+        }
+    }
+#endif
+    return rc;
 }
 
 VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *destination, unsigned capacity, unsigned *bytes)
 {
     (void)context;
+#if APP_XUH_MSC_MPEG_AUDIO
+    int result = mpeg_ps_read_video(&mpeg_ps, destination, capacity, bytes,
+                                    mpeg_ps_audio_send, &mpeg_audio_channel);
+    mpeg_bytes += *bytes;
+    return result;
+#else
     UINT count = 0;
     FRESULT rc = f_read(&mpeg_file, destination, capacity, &count);
     *bytes = count;
@@ -601,18 +644,24 @@ VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *dest
     if (rc) { printf("VIDEO.M1V: disk rc=%u\n", rc); return -1; }
     /* On this regular file, a zero-length read is the end of the stream. */
     return count ? 1 : 0;
+#endif
 }
 
 VIDEO_SOURCE_CLOSE static int mpeg_source_close(void *context)
 {
     (void)context;
-    return f_close(&mpeg_file);
+    int rc = f_close(&mpeg_file);
+#if APP_XUH_MSC_MPEG_AUDIO
+    audio_pipeline_stop(mpeg_audio_channel, audio_stats);
+    if (audio_stats[AUDIO_ERRORS]) return -1;
+#endif
+    return rc;
 }
 
 static int play_mpeg1(chanend c_load, unsigned number)
 {
     static const video_source_t source = {
-        "VIDEO.M1V", NULL, mpeg_source_open, mpeg_source_read, mpeg_source_close,
+        MPEG_FILE_NAME, NULL, mpeg_source_open, mpeg_source_read, mpeg_source_close,
         mpeg_pipeline_input_buffer, MPEG_LOAD_BYTES };
     static video_play_t play;
     g_msc_trace = 0;
@@ -624,6 +673,16 @@ static int play_mpeg1(chanend c_load, unsigned number)
            stats[MPEG_DECODED_FRAMES], frames, stats[PIPELINE_ERRORS],
            (int)stats[MPEG_DECODE_STATUS], mpeg_bytes);
     printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
+#if APP_XUH_MSC_MPEG_AUDIO
+    printf("MP2 %s: bytes=%u blocks=%u samples/channel=%u rate=%u errors=%u arena=%u checksum=%08x\n",
+           APP_XUH_MSC_AUDIO_DECODE ? "decode/discard" : "demux only",
+           audio_stats[AUDIO_BYTES], audio_stats[AUDIO_BLOCKS], audio_stats[AUDIO_SAMPLES],
+           audio_stats[AUDIO_RATE], audio_stats[AUDIO_ERRORS], audio_stats[AUDIO_PEAK],
+           audio_stats[AUDIO_CHECKSUM]);
+    printf("MP2 total decode: %u us; average %u us/block\n",
+           audio_stats[AUDIO_DECODE_US], audio_stats[AUDIO_BLOCKS] ?
+           audio_stats[AUDIO_DECODE_US] / audio_stats[AUDIO_BLOCKS] : 0);
+#endif
     if (play.failed || stats[PIPELINE_ERRORS] || frames != stats[MPEG_DECODED_FRAMES] || !frames) {
         activity_led_usb(ACTIVITY_LED_ERROR);
         printf("MPEG-1 playback failed\n");
@@ -645,8 +704,14 @@ void MassStorage(XUH_Ep ep_out0, XUH_Ep ep_in0, XUH_Ep ep_out2, XUH_Ep ep_in1
 #if APP_XUH_MSC_ENABLE_LCD
                  , chanend c_lcd_image
 #endif
+#if APP_XUH_MSC_MPEG_AUDIO
+                 , chanend c_audio
+#endif
                  )
 {
+#if APP_XUH_MSC_MPEG_AUDIO
+    mpeg_audio_channel = c_audio;
+#endif
     FRESULT rc;
     DIR dir;
     FILINFO fno;

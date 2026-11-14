@@ -1,4 +1,3 @@
-
 #if APP_XUH_MSC_ENABLE_LCD
 
 #include <stdint.h>

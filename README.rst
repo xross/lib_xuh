@@ -31,33 +31,32 @@ higher-level class drivers are responsible for device class handling and for
 assigning endpoint usage.
 
 The USB mass storage example demonstrates mounting storage media with FatFs and
-reading files from a USB mass storage device. It builds for the XK-EVK-XU316-AIV
-target by default and can also be built for the original XS2 target by setting
-``APP_HW_TARGET=xk-audio-216-mc.xn`` when configuring with CMake. The original
-XS2 board enables USB switch GPIO control in the app; the XU316 target assumes
-VBUS is hardwired.
+reading files from a USB mass storage device. The example supports XK-EVK-XU316
+targets, defaults to XK-EVK-XU316-AIV and assumes VBUS is hardwired. The library's
+XS2 transport support is separate from the XU316-only example application.
 
-The mass storage app has named ``jpeg`` and ``mpeg1`` build configurations on
-XU316. ``jpeg`` loops ``VIDEO.MJP``; ``mpeg1`` uses PL_MPEG to loop ``VIDEO.M1V``
-video elementary streams. Both run as fast as possible and report completed-play
-metrics through xSCOPE. Build commands, pipeline details and test limitations are
-in `the display pipeline guide <examples/app_xuh_msc/doc/rst/pipeline.rst>`_.
+The XU316 mass storage app provides ``jpeg`` (``VIDEO.MJP``), ``mpeg1``
+(``VIDEO.M1V`` elementary video) and ``mpeg1_audio`` (``VIDEO.MPG`` program stream)
+build configurations. The program-stream player decodes and discards MP2 audio;
+it does not provide audio output or A/V synchronisation. Playback runs at maximum
+speed and reports completed-play metrics through xSCOPE. Build commands, pipeline
+details and limitations are in
+`the display pipeline guide <examples/app_xuh_msc/doc/rst/pipeline.rst>`_.
 
 ILI9341 / ST7789V display
 =========================
 
 The XU316 mass storage example supports ILI9341 and ST7789V 240 by 320 LCDs,
-used in 320 by 240 landscape orientation. ILI9341 is the default. Select the
-original display with ``-DAPP_XUH_MSC_LCD_CONTROLLER=ST7789V`` when configuring
-CMake, or select the new display explicitly with
-``-DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341``. The controller choice applies to both
-the ``jpeg`` and ``mpeg1`` build configurations.
+used in 320 by 240 landscape orientation. ILI9341 is the default. Select ST7789V
+with ``-DAPP_XUH_MSC_LCD_CONTROLLER=ST7789V`` when configuring CMake, or ILI9341 with
+``-DAPP_XUH_MSC_LCD_CONTROLLER=ILI9341``. The controller choice applies to all
+three video build configurations.
 
-RGB888 image data is streamed from tile 1 to the tile 0 LCD task and converted
-into tile 0 RGB565 framebuffers. Images smaller than the display are centred
-with black borders. The complete framebuffer is assembled before the SPI
-transaction starts, and chip select remains asserted from the address-window
-commands through all pixel data for each update.
+JPEG RGB888 pixels or MPEG YUV420 strips cross from tile 1 to tile 0 and are
+converted into tile-0 RGB565 framebuffers. Smaller JPEG images are centred with
+black borders; MPEG playback requires 320 by 240. The complete framebuffer is
+assembled before the SPI transaction starts, and chip select remains asserted
+from the address-window commands through all pixel data for each update.
 
 Set ``APP_XUH_MSC_ENABLE_LCD=OFF`` when configuring with CMake to disable the
 display. Set ``APP_XUH_MSC_LCD_TEST_MODE=ON`` to replace JPEG rendering with a
@@ -99,18 +98,6 @@ MISO is not used. The display uses SPI mode 0 at 50 MHz. Connect the LCD and
 XU316 grounds together and consult the XK-EVK-XU316-AIV carrier schematic for
 the physical connector positions of the listed device pins.
 
-TODO
-=====
-
-* Port to later version of fatfs
-* Add assignable EP addresses (i.e. XUH has a bunch of EP resource and the higher-level can assign an address
-* Doesn't deal with NYET (in reply to OUT transfer)
-* Perform more than one tranfer per micro-frame
-* Detect device disconnects
-* Deal with FS (LS?) devices
-* Share code with lib_xud (or merge with lib_xud)
-    * lib_xud becomes "XMOS USB Driver" instead of "XMOS USB_Device"
-
 ********
 Features
 ********
@@ -123,7 +110,16 @@ Features
 Known issues
 ************
 
-* Too many to list.
+* USB support is experimental. Transfers can block indefinitely; disconnect
+  detection, timeouts and recovery are incomplete.
+* NYET responses to OUT transfers are not handled. Full-speed and low-speed
+  devices are not supported by the example.
+* The transport performs at most one transaction per microframe.
+* Host enumeration and MSC dispatch are currently coupled to the example;
+  other application types need integration work. FatFs is used for filesystem
+  access, while playback, LCD and audio handling are example-specific.
+* The player has no pacing, audio output or A/V synchronisation. See the pipeline
+  guide for media, memory and validation limits.
 
 ****************
 Development repo
@@ -141,7 +137,10 @@ Required tools
 Required libraries (dependencies)
 *********************************
 
-* None
+The transport depends on ``lib_xud``. The mass-storage example also uses
+``lib_logging`` and ``lib_fatfs``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
+for its selected playback configuration. Versions are pinned in
+``lib_xuh/lib_build_info.cmake`` and ``examples/deps.cmake``.
 
 *************************
 Related application notes
@@ -153,4 +152,6 @@ Related application notes
 Support
 *******
 
-This package is supported by XMOS Ltd. Issues can be raised against the software using GitHub `issues <https://github.com/xross/lib_xuh/issues>`_.
+This is an experimental community project, not an officially supported XMOS
+package. Report issues through GitHub
+`issues <https://github.com/xross/lib_xuh/issues>`_.

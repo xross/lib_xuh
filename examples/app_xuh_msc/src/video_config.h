@@ -1,0 +1,17 @@
+#ifndef VIDEO_CONFIG_H_
+#define VIDEO_CONFIG_H_
+
+/* Portable display geometry and pipeline selection; no XCORE resource types. */
+#ifndef APP_XUH_MSC_ENABLE_MPEG1
+#define APP_XUH_MSC_ENABLE_MPEG1 0
+#endif
+#if APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_JPEG
+#error Select one video decoder per build configuration
+#endif
+#define MSC_JPEG_PIPELINE (APP_XUH_MSC_ENABLE_JPEG && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
+#define MSC_MPEG_PIPELINE (APP_XUH_MSC_ENABLE_MPEG1 && APP_XUH_MSC_ENABLE_LCD && !APP_XUH_MSC_LCD_TEST_MODE)
+#define MSC_VIDEO_PIPELINE (MSC_JPEG_PIPELINE || MSC_MPEG_PIPELINE)
+#define PIPELINE_LCD_WIDTH 320
+#define PIPELINE_LCD_HEIGHT 240
+#define PIPELINE_TICKS_PER_SECOND 100000000u
+#endif

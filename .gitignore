@@ -16,3 +16,6 @@ CMakeCache.txt
 manifest.txt
 __pycache__/
 *.pyc
+*.jpg
+*.mp4
+*.mpg
