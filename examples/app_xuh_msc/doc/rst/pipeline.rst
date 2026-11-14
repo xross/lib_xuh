@@ -214,8 +214,8 @@ FatFs reads, with at most 64 512-byte sectors per command. Display work and
 filesystem reads do not execute inside the USB manager.
 
 The large memory model is required. A default MPEG-1 build uses 332516 bytes on
-tile 0 and 482188 bytes on tile 1, including code, data and reserved stacks;
-42100 bytes remain on tile 1. These are build-dependent figures, not an SRAM
+tile 0 and 482692 bytes on tile 1, including code, data and reserved stacks;
+41596 bytes remain on tile 1. These are build-dependent figures, not an SRAM
 budget for arbitrary additions. The decoder's 16-KiB stack reservation is
 provisional because callback branches prevent complete automatic analysis.
 
@@ -260,9 +260,9 @@ individual interval must fit one 32-bit timer period (42.9 s at 100 MHz).
    * - Audio / timing histograms
      - Disabled
    * - Completed-play rate
-     - **30.37 FPS** (99.573 s per play)
+     - **33.59 FPS** (90.049 s per play)
    * - Startup to first completed frame
-     - 77.289 ms
+     - 77.003 ms
 
 .. list-table:: Stage means for that workload (ms per displayed frame)
    :header-rows: 1
@@ -275,42 +275,41 @@ individual interval must fit one 32-bit timer period (42.9 s at 100 MHz).
      - 1.884
    * - Wait for loader
      - 1
-     - 0.494
+     - 0.500
    * - Feed
      - 1
-     - 0.109
+     - 0.097
    * - Decode
      - 1
-     - 22.899
+     - 19.137
    * - Transmit / acknowledgement wait
      - 1 to 0
-     - 9.395
+     - 10.014
    * - Receive YUV / wait
      - 0
      - 1.310
    * - YUV to RGB565
      - 0
-     - 5.765
+     - 5.766
    * - Wait previous LCD
      - 0
-     - 4.006
+     - 6.318
    * - LCD SPI
      - 0
      - 25.471
 
 Wait/feed/decode/handoff run serially on the decoder task and occupy about
-32.9 ms/frame. Loading, receive/conversion and LCD output overlap other stages;
+29.7 ms/frame. Loading, receive/conversion and LCD output overlap other stages;
 do not add them as independent costs. Send time includes blocked channel output
 while tile 0 converts or waits for a buffer; it is not pure link bandwidth.
 The 25.471-ms LCD transaction gives an approximately 39.3-FPS display ceiling,
 but the whole player is not at that ceiling.
 
 These figures describe one clip, not a worst-case or guaranteed 30-FPS rate.
-Optional instrumented runs give decode p95/p99 upper bounds of 35/40 ms and an
-observed maximum of 49.711 ms. Decoder service-period p95/p99 bounds are 44/50 ms,
-with an observed maximum of 60.176 ms. Of 3024 service intervals, 457 (15.1%)
-exceed 40 ms. Service intervals mark successive YUV handoffs, not LCD scanout;
-they are not a count of missed presentation deadlines in paced playback.
+Optional instrumented runs report decode and decoder service-period
+percentiles, maxima and counts above 40 ms for the current build/input.
+Service intervals mark successive YUV handoffs, not LCD scanout; they are not
+a count of missed presentation deadlines in paced playback.
 
 Frame timing is enabled with ``-DAPP_XUH_MSC_FRAME_TIMING=ON``. It uses two
 bounded histograms with 1-ms percentile upper bounds through 126 ms and an
