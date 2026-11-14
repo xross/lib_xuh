@@ -2,8 +2,8 @@
 #define FRAME_TIMING_H_
 #include <stdint.h>
 
-#ifndef APP_XUH_PLAYER_FRAME_TIMING
-#define APP_XUH_PLAYER_FRAME_TIMING 0
+#ifndef APP_XUH_MSC_PLAYER_FRAME_TIMING
+#define APP_XUH_MSC_PLAYER_FRAME_TIMING 0
 #endif
 
 /* Optional development instrumentation: 1-ms upper-bound buckets, the final

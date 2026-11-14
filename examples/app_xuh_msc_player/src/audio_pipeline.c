@@ -1,5 +1,5 @@
 #include "audio_pipeline.h"
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
 #include <string.h>
 #include <xcore/hwtimer.h>
 #include "jpeg_pipeline.h"

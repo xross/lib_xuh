@@ -11,18 +11,18 @@
  * The audio is decoded but not played and not synchronised with the video:
  * the meter shows the level of the audio most recently decoded.
  *
- * Build with -DAPP_XUH_PLAYER_AUDIO_METER=0 to leave frames untouched. */
-#ifndef APP_XUH_PLAYER_AUDIO_METER
-#define APP_XUH_PLAYER_AUDIO_METER 1
+ * Build with -DAPP_XUH_MSC_PLAYER_AUDIO_METER=0 to leave frames untouched. */
+#ifndef APP_XUH_MSC_PLAYER_AUDIO_METER
+#define APP_XUH_MSC_PLAYER_AUDIO_METER 1
 #endif
-#ifndef APP_XUH_PLAYER_MPEG_AUDIO
-#define APP_XUH_PLAYER_MPEG_AUDIO 0
+#ifndef APP_XUH_MSC_PLAYER_MPEG_AUDIO
+#define APP_XUH_MSC_PLAYER_MPEG_AUDIO 0
 #endif
-#ifndef APP_XUH_PLAYER_AUDIO_DECODE
-#define APP_XUH_PLAYER_AUDIO_DECODE 1
+#ifndef APP_XUH_MSC_PLAYER_AUDIO_DECODE
+#define APP_XUH_MSC_PLAYER_AUDIO_DECODE 1
 #endif
-#define AUDIO_METER_ENABLED (MSC_MPEG_PIPELINE && APP_XUH_PLAYER_MPEG_AUDIO && \
-    APP_XUH_PLAYER_AUDIO_DECODE && APP_XUH_PLAYER_AUDIO_METER)
+#define AUDIO_METER_ENABLED (MSC_MPEG_PIPELINE && APP_XUH_MSC_PLAYER_MPEG_AUDIO && \
+    APP_XUH_MSC_PLAYER_AUDIO_DECODE && APP_XUH_MSC_PLAYER_AUDIO_METER)
 
 /* Fixed physical screen rectangle, never relative to a video window. */
 enum { AUDIO_METER_WIDTH = 104, AUDIO_METER_HEIGHT = 22,

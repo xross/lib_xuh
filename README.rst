@@ -33,7 +33,7 @@ read-only mass storage class driver with optional FatFs disk functions.
 There are three examples for XK-EVK-XU316: ``app_xuh_msc``, a basic mass
 storage example that lists a directory and prints a text file;
 ``app_xuh_msc_bench``, which measures mass storage read rates; and
-``app_xuh_player``, a video player that reads from USB mass storage and renders
+``app_xuh_msc_player``, a video player that reads from USB mass storage and renders
 to an SPI LCD. All are described in the library guide.
 
 ********

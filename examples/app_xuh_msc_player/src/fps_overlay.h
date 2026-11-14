@@ -4,10 +4,10 @@
 /* On-screen FPS gauge: measured-rate bar with a muted spatial gradient
  * from brick red through amber to leaf green at the nominal source rate,
  * with a white source-rate tick and numeric readout in the top-left corner.
- * Build with -DAPP_XUH_PLAYER_FPS_OVERLAY=0 to leave frames
+ * Build with -DAPP_XUH_MSC_PLAYER_FPS_OVERLAY=0 to leave frames
  * untouched (required when frame hashes are compared with a reference). */
-#ifndef APP_XUH_PLAYER_FPS_OVERLAY
-#define APP_XUH_PLAYER_FPS_OVERLAY 1
+#ifndef APP_XUH_MSC_PLAYER_FPS_OVERLAY
+#define APP_XUH_MSC_PLAYER_FPS_OVERLAY 1
 #endif
 
 /* Fixed physical screen rectangle, never relative to a video window. */

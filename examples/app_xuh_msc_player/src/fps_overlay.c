@@ -1,7 +1,7 @@
 #include "fps_overlay.h"
 #include "video_config.h"
 
-#if MSC_VIDEO_PIPELINE && APP_XUH_PLAYER_FPS_OVERLAY
+#if MSC_VIDEO_PIPELINE && APP_XUH_MSC_PLAYER_FPS_OVERLAY
 enum { GLYPH_WIDTH = 5, GLYPH_HEIGHT = 7, SCALE = 1,
         ORIGIN_X = FPS_OVERLAY_X, ORIGIN_Y = FPS_OVERLAY_Y,
         CELL = (GLYPH_WIDTH + 1) * SCALE, TEXT_LENGTH = 8,

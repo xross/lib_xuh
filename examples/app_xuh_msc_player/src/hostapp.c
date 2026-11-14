@@ -7,7 +7,7 @@
 
 /* In player.c: mount the volume and play from it. */
 void MassStorageApp(chanend c_load
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
                     , chanend c_audio
 #endif
                     );
@@ -22,7 +22,7 @@ XUH_ACTIVITY_CALLBACK static void usb_activity(XUH_Activity activity)
 
 void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in,
              chanend c_load
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
              , chanend c_audio
 #endif
              )
@@ -49,7 +49,7 @@ void USBHost(chanend c_out[], unsigned n_out, chanend c_in[], unsigned n_in,
             printf("USB: mass storage, %u blocks of %u bytes\n",
                    (unsigned)msc.blockCount, (unsigned)msc.blockSize);
             MassStorageApp(c_load
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
                            , c_audio
 #endif
                            );

@@ -89,7 +89,7 @@ static void lcd_write_command_data(client spi_master_if spi,
     spi.end_transaction(0);
 }
 
-#if APP_XUH_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
+#if APP_XUH_MSC_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
 static void lcd_write_command_bytes(client spi_master_if spi,
                                     unsigned command,
                                     const uint8_t data[], unsigned count)
@@ -123,7 +123,7 @@ static void lcd_init_ili9341(client spi_master_if spi)
     lcd_write_command(spi, LCD_SLPOUT);
     delay_milliseconds(120);
 }
-#elif APP_XUH_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
+#elif APP_XUH_MSC_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
 static void lcd_init_st7789v(client spi_master_if spi)
 {
     /* Preserve the original ST7789V command order and settings. */
@@ -152,9 +152,9 @@ static void lcd_init(client spi_master_if spi)
 
     lcd_write_command(spi, LCD_SWRESET);
     delay_milliseconds(150);
-#if APP_XUH_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
+#if APP_XUH_MSC_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ILI9341
     lcd_init_ili9341(spi);
-#elif APP_XUH_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
+#elif APP_XUH_MSC_PLAYER_LCD_CONTROLLER == LCD_CONTROLLER_ST7789V
     lcd_init_st7789v(spi);
 #endif
     lcd_write_command(spi, LCD_DISPON);
@@ -198,7 +198,7 @@ static void lcd_fill_screen(client spi_master_if spi, uint16_t color)
     spi.end_transaction(0);
 }
 
-#if APP_XUH_PLAYER_LCD_TEST_MODE
+#if APP_XUH_MSC_PLAYER_LCD_TEST_MODE
 static void lcd_fill_box(client spi_master_if spi, unsigned x, uint16_t color)
 {
     uint8_t line[BOX_SIZE * 2];
@@ -296,7 +296,7 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
                 lcd_write_video_row(spi,
                     (const uint8_t *)(buffer + video_window_rgb_offset(window, y)), window.width * 2);
             spi.end_transaction(0);
-#if MSC_MPEG_PIPELINE && APP_XUH_PLAYER_FPS_OVERLAY
+#if MSC_MPEG_PIPELINE && APP_XUH_MSC_PLAYER_FPS_OVERLAY
             /* The gauge is drawn in screen coordinates. If any of it lies
              * outside the video, refresh its fixed rectangle separately. */
             if (window.x > FPS_OVERLAY_X || window.y > FPS_OVERLAY_Y ||
@@ -344,7 +344,7 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 
 void lcd_display_task(client spi_master_if spi, chanend c_image)
 {
-#if APP_XUH_PLAYER_LCD_TEST_MODE
+#if APP_XUH_MSC_PLAYER_LCD_TEST_MODE
     unsigned x = 0;
     int direction = 1;
 #endif
@@ -355,7 +355,7 @@ void lcd_display_task(client spi_master_if spi, chanend c_image)
     lcd_init(spi);
     lcd_fill_screen(spi, RGB565_BLACK);
 
-#if APP_XUH_PLAYER_LCD_TEST_MODE
+#if APP_XUH_MSC_PLAYER_LCD_TEST_MODE
     lcd_fill_box(spi, x, RGB565_YELLOW);
 
     while (1) {

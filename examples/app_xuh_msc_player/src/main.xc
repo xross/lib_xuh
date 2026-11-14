@@ -24,7 +24,7 @@ on tile[0]: clock lcd_spi_clock = XS1_CLKBLK_1;
 
 void main()
 {
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     chan c_audio;
 #endif
     chan xuhChans_out[NUM_EPS];
@@ -39,10 +39,10 @@ void main()
 
     par
     {
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
         on tile[0]: mp2_audio_task(c_audio);
 #endif
-#if APP_XUH_PLAYER_ACTIVITY_LED
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
         on tile[1]: activity_led_task();
 #endif
         on tile[0]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
@@ -77,7 +77,7 @@ void main()
 #else
                     , c_lcd_image
 #endif
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
                     , c_audio
 #endif
                     );

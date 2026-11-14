@@ -236,10 +236,10 @@ the paths.
 The rates are those of one device on this transport, which performs at most one
 transaction per microframe; they are not a property of the device alone.
 
-app_xuh_player
-==============
+app_xuh_msc_player
+==================
 
-``examples/app_xuh_player`` plays video from a FAT-formatted USB stick to a
+``examples/app_xuh_msc_player`` plays video from a FAT-formatted USB stick to a
 320 x 240 SPI LCD on XK-EVK-XU316-AIV. Source and test paths in this section are
 relative to that directory unless they start at the repository root.
 
@@ -253,7 +253,7 @@ Build and run
 
 In terminal with XMOS XTC tools available. From the repository root::
 
-    cmake -G "Unix Makefiles" -S examples/app_xuh_player -B build-video
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player -B build-video
     xmake -C build-video
 
 The XU316/LCD build provides three configurations:
@@ -277,7 +277,7 @@ The XU316/LCD build provides three configurations:
 Each executable contains only its selected video decoder. Build one
 configuration with ``xmake -C build-video mpeg1`` and run it with::
 
-    xrun --xscope --xscope-io-only build-video/bin/mpeg1/app_xuh_player_mpeg1.xe
+    xrun --xscope --xscope-io-only build-video/bin/mpeg1/app_xuh_msc_player_mpeg1.xe
 
 Substitute the configuration in both path components for another player.
 Successful playback runs indefinitely; stop xrun with Ctrl-C after collecting
@@ -304,34 +304,34 @@ benchmark configuration:
    * - Option
      - Default
      - Purpose
-   * - ``APP_XUH_PLAYER_LCD_CONTROLLER``
+   * - ``APP_XUH_MSC_PLAYER_LCD_CONTROLLER``
      - ``ILI9341``
      - Select ``ILI9341`` or ``ST7789V``
-   * - ``APP_XUH_PLAYER_LCD_TEST_MODE``
+   * - ``APP_XUH_MSC_PLAYER_LCD_TEST_MODE``
      - ``OFF``
      - Run a moving-box LCD test instead of video
-   * - ``APP_XUH_PLAYER_FPS_OVERLAY``
+   * - ``APP_XUH_MSC_PLAYER_FPS_OVERLAY``
      - ``ON``
      - Draw a smoothed measured-FPS gauge with the MPEG source-rate target
-   * - ``APP_XUH_PLAYER_ACTIVITY_LED``
+   * - ``APP_XUH_MSC_PLAYER_ACTIVITY_LED``
      - ``ON`` on AIV
      - Enable the activity/status LED task
-   * - ``APP_XUH_PLAYER_LED_ACTIVE_LOW``
+   * - ``APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW``
      - ``OFF``
      - Invert LED outputs for active-low wiring
-   * - ``APP_XUH_PLAYER_AUDIO_DECODE``
+   * - ``APP_XUH_MSC_PLAYER_AUDIO_DECODE``
      - ``ON``
      - In ``mpeg1_audio``, decode MP2; ``OFF`` measures demux/I/O only
-   * - ``APP_XUH_PLAYER_AUDIO_METER``
+   * - ``APP_XUH_MSC_PLAYER_AUDIO_METER``
      - ``ON``
      - In ``mpeg1_audio``, draw a stereo level meter for the decoded audio
-   * - ``APP_XUH_PLAYER_MPEG_FILE``
+   * - ``APP_XUH_MSC_PLAYER_MPEG_FILE``
      - Empty
      - Override the MPEG root filename; the defaults remain configuration-specific
-   * - ``APP_XUH_PLAYER_FRAME_TIMING``
+   * - ``APP_XUH_MSC_PLAYER_FRAME_TIMING``
      - ``OFF``
      - Collect MPEG decode and service-period histograms
-   * - ``APP_XUH_PLAYER_PROFILE_SILENT``
+   * - ``APP_XUH_MSC_PLAYER_PROFILE_SILENT``
      - ``OFF``
      - Disable xSCOPE and discard terminal output for sampled profiling
 
@@ -346,11 +346,11 @@ The ``mpeg1_audio`` default is a 320 x 180 program stream. To play another
 program stream on the USB stick, such as the full-screen ``VIDEO.MPG``, select
 its filename without renaming the file::
 
-    cmake -G "Unix Makefiles" -S examples/app_xuh_player -B build-full-video \
-      -DAPP_XUH_PLAYER_MPEG_FILE=VIDEO.MPG
-    xmake -C build-full-video app_xuh_player_mpeg1_audio
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player -B build-full-video \
+      -DAPP_XUH_MSC_PLAYER_MPEG_FILE=VIDEO.MPG
+    xmake -C build-full-video app_xuh_msc_player_mpeg1_audio
     xrun --xscope --xscope-io-only \
-      build-full-video/bin/mpeg1_audio/app_xuh_player_mpeg1_audio.xe
+      build-full-video/bin/mpeg1_audio/app_xuh_msc_player_mpeg1_audio.xe
 
 The filename selects the input, not its dimensions or format. The ``mpeg1``
 configuration still requires elementary video; ``mpeg1_audio`` demultiplexes MPG.
@@ -399,7 +399,7 @@ on. Verify orientation, colour order and signal integrity on the actual panel.
 The 50-MHz throughput measurement below applies to ILI9341; ST7789V has not been
 validated at that clock. Consult the carrier schematic for physical connectors.
 
-With ``APP_XUH_PLAYER_LCD_TEST_MODE=ON`` a 32 by 32 box moves across the display
+With ``APP_XUH_MSC_PLAYER_LCD_TEST_MODE=ON`` a 32 by 32 box moves across the display
 in place of video. Each animation step updates only the 33 by 32 region covering
 the old and new box positions.
 
@@ -543,7 +543,7 @@ individual interval must fit one 32-bit timer period (42.9 s at 100 MHz).
 
 Benchmark with a full-screen 320 x 240 picture. The ``mpeg1`` default is one;
 the ``mpeg1_audio`` default is the smaller 320 x 180 stream, so configure that
-build with ``-DAPP_XUH_PLAYER_MPEG_FILE=VIDEO.MPG`` when measuring.
+build with ``-DAPP_XUH_MSC_PLAYER_MPEG_FILE=VIDEO.MPG`` when measuring.
 
 .. list-table:: Default MPEG-1 hardware workload
    :header-rows: 1
@@ -622,7 +622,7 @@ percentiles, maxima and counts above 40 ms for the current build/input.
 Service intervals mark successive YUV handoffs, not LCD scanout; they are not
 a count of missed presentation deadlines in paced playback.
 
-Frame timing is enabled with ``-DAPP_XUH_PLAYER_FRAME_TIMING=ON``. It uses two
+Frame timing is enabled with ``-DAPP_XUH_MSC_PLAYER_FRAME_TIMING=ON``. It uses two
 bounded histograms with 1-ms percentile upper bounds through 126 ms and an
 overflow bucket bounded by the observed maximum. Decode samples sum all
 ``mpeg_next()`` work needed for a picture; service samples include input, feed,
@@ -642,16 +642,16 @@ required; set ``FATFS_ROOT`` if that checkout is elsewhere::
 
     python3 -m venv .venv
     source .venv/bin/activate
-    cmake -S examples/app_xuh_player/tests -B build-app-native-tests
+    cmake -S examples/app_xuh_msc_player/tests -B build-app-native-tests
     cmake --build build-app-native-tests -j 8
     ctest --test-dir build-app-native-tests --output-on-failure
 
 To include a local full program stream in the byte-identity check::
 
-    python examples/app_xuh_player/tests/test_ps_demux.py \
+    python examples/app_xuh_msc_player/tests/test_ps_demux.py \
       --demux build-app-native-tests/mpeg_ps_demux \
       --work build-app-native-tests/ps-full \
-      --full examples/app_xuh_player/data/VIDEO.MPG
+      --full examples/app_xuh_msc_player/data/VIDEO.MPG
 
 ``VIDEO.MPG`` is generated locally and excluded from Git; use the input-file
 commands above to make your own. The demux checks belong to this application
@@ -664,10 +664,10 @@ draining after a latched error and restart. The runner generates three MP2
 frames with FFmpeg and requires normal termination and the checked success
 marker::
 
-    cmake -G "Unix Makefiles" -S examples/app_xuh_player/tests/app_audio_pipeline \
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_audio_pipeline \
       -B build-audio-pipeline
     xmake -C build-audio-pipeline -j 8
-    python examples/app_xuh_player/tests/run_audio_pipeline.py \
+    python examples/app_xuh_msc_player/tests/run_audio_pipeline.py \
       --xe build-audio-pipeline/bin/test_audio_pipeline.xe \
       --work build-audio-pipeline/fixtures --adapter-id SERIAL --timeout 60
 
@@ -680,7 +680,7 @@ runners belong to ``lib_mpeg``. With that library's Python venv
 active, run its native validation suite from this repository's root::
 
     cmake -S ../lib_mpeg/tests -B ../lib_mpeg/build-native-validation \
-      -DMPEG_TEST_VIDEO_STREAM="$PWD/examples/app_xuh_player/data/VIDEO.M1V"
+      -DMPEG_TEST_VIDEO_STREAM="$PWD/examples/app_xuh_msc_player/data/VIDEO.M1V"
     cmake --build ../lib_mpeg/build-native-validation -j 8
     ctest --test-dir ../lib_mpeg/build-native-validation --output-on-failure
 
@@ -699,9 +699,9 @@ For a matched hardware IDCT comparison, build the application once with
 VPU transform, keeping separate build directories, then run::
 
     python ../lib_mpeg/tests/usb_lcd/compare_mpeg_idct.py \
-      --original build-original/bin/mpeg1/app_xuh_player_mpeg1.xe \
-      --vpu build-vpu/bin/mpeg1/app_xuh_player_mpeg1.xe \
-      --adapter-id SERIAL --stream examples/app_xuh_player/data/VIDEO.M1V \
+      --original build-original/bin/mpeg1/app_xuh_msc_player_mpeg1.xe \
+      --vpu build-vpu/bin/mpeg1/app_xuh_msc_player_mpeg1.xe \
+      --adapter-id SERIAL --stream examples/app_xuh_msc_player/data/VIDEO.M1V \
       --work build-player-comparison --timeout 420
 
 It checks complete reports, frame/byte counts, EOF status and arena cleanup,
@@ -724,11 +724,11 @@ With XTC Tools active, build a host reference first, then the six-picture fixtur
 
     cmake -S ../lib_mpeg/tests -B ../lib_mpeg/build-pipeline-reference
     cmake --build ../lib_mpeg/build-pipeline-reference -j 8
-    cmake -G "Unix Makefiles" -S examples/app_xuh_player/tests/app_mpeg_pipeline \
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_mpeg_pipeline \
       -B build-mpeg-pipeline -DMPEG_PIPELINE_TEST_FRAMES=6 \
       -DMPEG_PIPELINE_TEST_XSCOPE=OFF
     xmake -C build-mpeg-pipeline -j 8
-    python examples/app_xuh_player/tests/run_mpeg_pipeline.py \
+    python examples/app_xuh_msc_player/tests/run_mpeg_pipeline.py \
       --bench ../lib_mpeg/build-pipeline-reference/mpeg_bench \
       --xe build-mpeg-pipeline/bin/test_mpeg_pipeline.xe \
       --work build-mpeg-pipeline/fixtures --frames 6 --timeout 180 \
@@ -756,7 +756,7 @@ Sampled profiling
 -----------------
 
 XTC Tools 15.3.1 cannot combine ``--gprof`` with ``--xscope``. Build separately
-with ``-DAPP_XUH_PLAYER_PROFILE_SILENT=ON`` for PC sampling; this discards writes
+with ``-DAPP_XUH_MSC_PLAYER_PROFILE_SILENT=ON`` for PC sampling; this discards writes
 without JTAG logging pauses. Keep optimisation settings unchanged, run xgdb with
 ``connect --gprof`` and ``load``, break at ``video_loader_report``, then continue.
 Inspect the completed play and quit to flush profiles. Extract the matching

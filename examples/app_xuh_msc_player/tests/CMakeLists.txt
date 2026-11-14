@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(app_xuh_player_native_tests C)
+project(app_xuh_msc_player_native_tests C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 enable_testing()
@@ -15,16 +15,16 @@ add_executable(mpeg_ps_demux mpeg_ps_demux.c ../src/mpeg_ps_reader.c)
 add_executable(fps_overlay_test fps_overlay_test.c ../src/fps_overlay.c)
 add_executable(video_window_test video_window_test.c ../src/fps_overlay.c)
 add_executable(audio_meter_test audio_meter_test.c ../src/audio_meter.c)
-target_compile_definitions(audio_meter_test PRIVATE APP_XUH_PLAYER_ENABLE_JPEG=0
-    APP_XUH_PLAYER_ENABLE_MPEG1=1 APP_XUH_PLAYER_MPEG_AUDIO=1)
+target_compile_definitions(audio_meter_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
+    APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1 APP_XUH_MSC_PLAYER_MPEG_AUDIO=1)
 add_executable(frame_timing_test frame_timing_test.c)
 add_executable(activity_led_test activity_led_test.c ../src/activity_led.c)
 add_executable(mjpeg_reader_test mjpeg_reader_test.c ../src/mjpeg_reader.c)
 target_include_directories(mjpeg_reader_test PRIVATE "${FATFS_ROOT}/lib_fatfs/api")
-target_compile_definitions(fps_overlay_test PRIVATE APP_XUH_PLAYER_ENABLE_JPEG=0
-    APP_XUH_PLAYER_ENABLE_MPEG1=1)
-target_compile_definitions(video_window_test PRIVATE APP_XUH_PLAYER_ENABLE_JPEG=0
-    APP_XUH_PLAYER_ENABLE_MPEG1=1)
+target_compile_definitions(fps_overlay_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
+    APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
+target_compile_definitions(video_window_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
+    APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
 foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test audio_meter_test frame_timing_test activity_led_test mjpeg_reader_test)
     target_include_directories(${target} PRIVATE ../src)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)

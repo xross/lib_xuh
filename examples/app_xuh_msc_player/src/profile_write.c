@@ -1,4 +1,4 @@
-#if defined(APP_XUH_PLAYER_PROFILE_SILENT) && APP_XUH_PLAYER_PROFILE_SILENT
+#if defined(APP_XUH_MSC_PLAYER_PROFILE_SILENT) && APP_XUH_MSC_PLAYER_PROFILE_SILENT
 #include <stddef.h>
 #include <syscall.h>
 

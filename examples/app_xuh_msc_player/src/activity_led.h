@@ -1,14 +1,14 @@
 #ifndef ACTIVITY_LED_H_
 #define ACTIVITY_LED_H_
 
-#ifndef APP_XUH_PLAYER_ACTIVITY_LED
-#define APP_XUH_PLAYER_ACTIVITY_LED 0
+#ifndef APP_XUH_MSC_PLAYER_ACTIVITY_LED
+#define APP_XUH_MSC_PLAYER_ACTIVITY_LED 0
 #endif
 
 enum { ACTIVITY_LED_BUSY = 1, ACTIVITY_LED_ERROR = 2, ACTIVITY_LED_FRAME = 4 };
 #define ACTIVITY_LED_FRAME_MASK 0xff000000u
 
-#if APP_XUH_PLAYER_ACTIVITY_LED
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
 /* Tile 1 only. USBHost owns usb(); the decoder owns decode(). Errors latch
  * until reset. FRAME marks a successfully decoded frame, not an input request.
  * These best-effort updates never wait for the LED task. */

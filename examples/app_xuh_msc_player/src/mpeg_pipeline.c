@@ -13,7 +13,7 @@
 #include "audio_meter.h"
 #include "frame_timing.h"
 
-#if APP_XUH_PLAYER_FRAME_TIMING
+#if APP_XUH_MSC_PLAYER_FRAME_TIMING
 static void report_frame_timing(const char *name, const frame_timing_t *timing)
 {
     printf("MPEG timing %s: count=%u min=%u p50_le=%u p95_le=%u p99_le=%u max=%u over_40ms=%u\n",
@@ -126,7 +126,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         unsigned stats[MPEG_STATS_WORDS] = {0};
         mpeg_result_t result = mpeg_open(video_memory, sizeof(video_memory));
         int opened = result >= 0;
-#if APP_XUH_PLAYER_FRAME_TIMING
+#if APP_XUH_MSC_PLAYER_FRAME_TIMING
         frame_timing_t decode_timing = {.count = 0}, service_timing = {.count = 0};
         unsigned frame_decode_ticks = 0, previous_ack = 0;
 #endif
@@ -135,7 +135,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
             unsigned start = get_reference_time();
             activity_led_decode(ACTIVITY_LED_BUSY);
             result = mpeg_next(&frame);
-#if APP_XUH_PLAYER_FRAME_TIMING
+#if APP_XUH_MSC_PLAYER_FRAME_TIMING
             unsigned decode_ticks = get_reference_time() - start;
             decode_us += decode_ticks / 100;
             /* A frame may require several next/feed cycles. Sum decode work,
@@ -159,7 +159,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 start = get_reference_time();
                 send_frame(c_image, &frame, &send_us, &ack_wait_us);
                 transfer_us += (get_reference_time() - start) / 100;
-#if APP_XUH_PLAYER_FRAME_TIMING
+#if APP_XUH_MSC_PLAYER_FRAME_TIMING
                 unsigned acknowledged = get_reference_time();
                 frame_timing_add(&decode_timing, frame_decode_ticks / 100);
                 frame_decode_ticks = 0;
@@ -255,7 +255,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
         stats[MPEG_ACK_WAIT_US] = ack_wait_us;
         stats[MPEG_DECODED_FRAMES] = decoded;
         stats[MPEG_DECODE_STATUS] = (unsigned)result;
-#if APP_XUH_PLAYER_FRAME_TIMING
+#if APP_XUH_MSC_PLAYER_FRAME_TIMING
         /* All rendering has drained. Never print per-frame or inside decode. */
         report_frame_timing("decode", &decode_timing);
         report_frame_timing("service", &service_timing);
@@ -278,7 +278,7 @@ static void record_render(unsigned stats[], unsigned ack[], unsigned expected)
 static void receive_play(chanend c_image, chanend c_render)
 {
     unsigned expected = 0, pending = 0, ack[3], stats[PIPELINE_STATS_WORDS] = {0};
-#if APP_XUH_PLAYER_FPS_OVERLAY
+#if APP_XUH_MSC_PLAYER_FPS_OVERLAY
     fps_overlay_t fps = {0};    /* Per play: the first window restarts with it. */
 #endif
 #if AUDIO_METER_ENABLED
@@ -330,7 +330,7 @@ static void receive_play(chanend c_image, chanend c_render)
          * overlay work and renderer/ack waits are outside these two totals. */
         stats[PIPELINE_RECEIVE_TICKS] += receive_ticks / 100;
         stats[PIPELINE_CONVERT_TICKS] += convert_ticks / 100;
-#if APP_XUH_PLAYER_FPS_OVERLAY
+#if APP_XUH_MSC_PLAYER_FPS_OVERLAY
         fps.target_tenths = rate_tenths;
         fps_overlay_frame(&fps, get_reference_time(), lcd_frames[slot]);
 #endif

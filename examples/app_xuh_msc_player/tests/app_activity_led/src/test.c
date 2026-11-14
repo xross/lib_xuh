@@ -6,8 +6,8 @@
 #include <xcore/port.h>
 #include "activity_led.h"
 
-#ifndef APP_XUH_PLAYER_LED_ACTIVE_LOW
-#define APP_XUH_PLAYER_LED_ACTIVE_LOW 0
+#ifndef APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW
+#define APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW 0
 #endif
 
 static void sample(hwtimer_t timer, unsigned on[2])
@@ -18,7 +18,7 @@ static void sample(hwtimer_t timer, unsigned on[2])
         hwtimer_wait_until(timer, start + i * 1000); /* Four PWM periods. */
         unsigned value = port_peek(XS1_PORT_32A);
         assert((value & ~3u) == 0);
-        value ^= APP_XUH_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
+        value ^= APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
         if (value & 1) ++on[0];
         if (value & 2) ++on[1];
     }

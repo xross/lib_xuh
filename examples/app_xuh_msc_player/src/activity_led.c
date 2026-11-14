@@ -71,7 +71,7 @@ unsigned activity_led_pwm_edges(const unsigned duty[2], activity_led_edge_t edge
     return count;
 }
 
-#if APP_XUH_PLAYER_ACTIVITY_LED
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
 #ifndef __XS3A__
 #error The activity LED task requires XS3 tile-local memory and reference time
 #endif
@@ -80,8 +80,8 @@ unsigned activity_led_pwm_edges(const unsigned duty[2], activity_led_edge_t edge
 #include <xcore/hwtimer.h>
 #include <xcore/port.h>
 
-#ifndef APP_XUH_PLAYER_LED_ACTIVE_LOW
-#define APP_XUH_PLAYER_LED_ACTIVE_LOW 0
+#ifndef APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW
+#define APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW 0
 #endif
 
 /* XS3 tile-local, single-writer mailboxes. Every shared access uses one aligned
@@ -111,7 +111,7 @@ void activity_led_decode(unsigned flags) { publish_word(&decode_word, flags); }
 void activity_led_task(void)
 {
     const port_t port = XS1_PORT_32A; /* Tile 1: bit 0 green, bit 1 red. */
-    const unsigned invert = APP_XUH_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
+    const unsigned invert = APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
     activity_led_effect_t effect = {{0, 0}, {0, 0}, 0, 0, 0, 0, 0};
     activity_led_edge_t edges[3];
     unsigned duty[2] = {0}, count = 1, frame = 0;

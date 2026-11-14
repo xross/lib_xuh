@@ -12,7 +12,7 @@
 #include "video_loader.h"
 #include "activity_led.h"
 #include "audio_pipeline.h"
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
 #include "mpeg_ps_reader.h"
 #endif
 
@@ -75,12 +75,12 @@ static void run_jpeg_pipeline(chanend c_load)
 /* FatFs-backed source for the shared loader: one unit is one stream chunk. */
 static FIL mpeg_file;
 static unsigned long long mpeg_bytes;
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
 static mpeg_ps_reader_t mpeg_ps;
 static chanend mpeg_audio_channel;
 static unsigned audio_stats[AUDIO_STATS_WORDS];
-#ifndef APP_XUH_PLAYER_MPEG_FILE
-#define APP_XUH_PLAYER_MPEG_FILE "VIDEO_320x180.MPG"
+#ifndef APP_XUH_MSC_PLAYER_MPEG_FILE
+#define APP_XUH_MSC_PLAYER_MPEG_FILE "VIDEO_320x180.MPG"
 #endif
 
 PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data,
@@ -98,22 +98,22 @@ PS_AUDIO_CALLBACK static int mpeg_ps_audio_send(void *context,
     return audio_pipeline_send(*(chanend *)context, data, bytes);
 }
 #else
-#ifndef APP_XUH_PLAYER_MPEG_FILE
-#define APP_XUH_PLAYER_MPEG_FILE "VIDEO.M1V"
+#ifndef APP_XUH_MSC_PLAYER_MPEG_FILE
+#define APP_XUH_MSC_PLAYER_MPEG_FILE "VIDEO.M1V"
 #endif
 #endif
-#define MPEG_FILE_NAME APP_XUH_PLAYER_MPEG_FILE
+#define MPEG_FILE_NAME APP_XUH_MSC_PLAYER_MPEG_FILE
 
 VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
 {
     (void)context;
     mpeg_bytes = 0;
     int rc = f_open(&mpeg_file, MPEG_FILE_NAME, FA_READ);
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     memset(audio_stats, 0, sizeof(audio_stats));
     if (!rc) {
         mpeg_ps_init(&mpeg_ps, mpeg_ps_disk_read, &mpeg_file);
-        if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_PLAYER_AUDIO_DECODE)) {
+        if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_MSC_PLAYER_AUDIO_DECODE)) {
             audio_pipeline_stop(mpeg_audio_channel, audio_stats);
             f_close(&mpeg_file);
             return -1;
@@ -126,7 +126,7 @@ VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
 VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *destination, unsigned capacity, unsigned *bytes)
 {
     (void)context;
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     int result = mpeg_ps_read_video(&mpeg_ps, destination, capacity, bytes,
                                     mpeg_ps_audio_send, &mpeg_audio_channel);
     mpeg_bytes += *bytes;
@@ -146,7 +146,7 @@ VIDEO_SOURCE_CLOSE static int mpeg_source_close(void *context)
 {
     (void)context;
     int rc = f_close(&mpeg_file);
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     audio_pipeline_stop(mpeg_audio_channel, audio_stats);
     if (audio_stats[AUDIO_ERRORS]) return -1;
 #endif
@@ -167,9 +167,9 @@ static int play_mpeg1(chanend c_load, unsigned number)
            stats[MPEG_DECODED_FRAMES], frames, stats[PIPELINE_ERRORS],
            (int)stats[MPEG_DECODE_STATUS], mpeg_bytes);
     printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     printf("MP2 %s: bytes=%u blocks=%u samples/channel=%u rate=%u errors=%u arena=%u checksum=%08x\n",
-           APP_XUH_PLAYER_AUDIO_DECODE ? "decode/discard" : "demux only",
+           APP_XUH_MSC_PLAYER_AUDIO_DECODE ? "decode/discard" : "demux only",
            audio_stats[AUDIO_BYTES], audio_stats[AUDIO_BLOCKS], audio_stats[AUDIO_SAMPLES],
            audio_stats[AUDIO_RATE], audio_stats[AUDIO_ERRORS], audio_stats[AUDIO_PEAK],
            audio_stats[AUDIO_CHECKSUM]);
@@ -198,12 +198,12 @@ static void run_mpeg_pipeline(chanend c_load)
  * drive 0. Mounts the volume and plays from it; returns when playback fails.
  * c_load is the channel to the decoder that the loader feeds. */
 void MassStorageApp(chanend c_load
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
                     , chanend c_audio
 #endif
                     )
 {
-#if APP_XUH_PLAYER_MPEG_AUDIO
+#if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     mpeg_audio_channel = c_audio;
 #endif
     FRESULT rc = f_mount(&Fatfs, "", 1);
