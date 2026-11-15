@@ -714,7 +714,7 @@ marker::
 
     python -m pip install -r requirements-hardware.txt
     cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_audio_pipeline \
-      -B build-audio-pipeline
+      -B build-audio-pipeline -DAPP_HW_TARGET=XK-EVK-XU316-AIV.xn
     xmake -C build-audio-pipeline -j 8
     python examples/app_xuh_msc_player/tests/run_audio_pipeline.py \
       --xe build-audio-pipeline/bin/test_audio_pipeline.xe \
@@ -729,8 +729,10 @@ pinned development revision of ``test_support`` into the active venv; it require
 SSH access to that repository. Replace it with an upstream release when available.
 Native tests do not require it.
 
-The test uses xSCOPE text I/O on hardware; configure ``APP_HW_TARGET`` to the
-board's XN (the test includes ``XK-EVK-XU316-AIV.xn`` for AIV/XL1).
+Both pipeline fixtures default to ``XK-EVK-XU316-AIV.xn``, matching the AIV board's
+XL1 xSCOPE wiring. ``APP_HW_TARGET`` remains configurable for other boards. The
+explicit target option above also updates build directories cached with the old
+stock XL0 target; use a fresh build directory or reconfigure with that option.
 Omit ``--adapter-id`` to simulate with cycle and host-time bounds. This fixture
 uses JTAG host-file I/O, not USB or a physical audio interface, and is not a
 throughput benchmark.
@@ -796,24 +798,25 @@ With XTC Tools active, build a host reference first, then the six-picture fixtur
     cmake --build ../lib_mpeg/build-pipeline-reference -j 8
     cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_mpeg_pipeline \
       -B build-mpeg-pipeline -DMPEG_PIPELINE_TEST_FRAMES=6 \
-      -DMPEG_PIPELINE_TEST_XSCOPE=OFF
+      -DAPP_HW_TARGET=XK-EVK-XU316-AIV.xn -DMPEG_PIPELINE_TEST_XSCOPE=ON
     xmake -C build-mpeg-pipeline -j 8
     python examples/app_xuh_msc_player/tests/run_mpeg_pipeline.py \
       --bench ../lib_mpeg/build-pipeline-reference/mpeg_bench \
       --xe build-mpeg-pipeline/bin/test_mpeg_pipeline.xe \
       --work build-mpeg-pipeline/fixtures --frames 6 --timeout 180 \
-      --adapter-id SERIAL --jtag
+      --adapter-id SERIAL
 
 Success requires normal termination, seven completed cases and all expected
 frame hashes. Add ``--width 320 --height 180`` (or ``--width 256 --height 144``)
 to test centred input; the second play uses an alternate resolution and the
 remaining successful plays return to the requested size. The native window
 test checks geometry, black borders, screen stride and the fixed gauge position.
-Timeouts/cycle bounds are failures, not passes. JTAG is suitable
-only for this substituted functional fixture, not the real USB player. The stock
-simulator target uses xSCOPE on XL0 while AIV uses XL1; the JTAG fixture avoids
-that wiring mismatch. Omit hardware options to use the simulator with a suitable
-host timeout; simulation is much slower than hardware.
+Timeouts/cycle bounds are failures, not passes. The normal hardware run uses full
+xSCOPE for text output while retaining host-file servicing; do not use
+``--xscope-io-only`` with these host-file fixtures. For an explicit JTAG debug run
+only, build with ``MPEG_PIPELINE_TEST_XSCOPE=OFF`` and pass ``--jtag``. That fallback
+is not suitable for real-player timing measurements. Omit hardware options to use
+the simulator with a suitable host timeout; simulation is much slower than hardware.
 
 The native JPEG-reader and activity-LED tests are registered in the native suite
 above. Their simulated or host results do not validate physical USB, LCD signal

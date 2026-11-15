@@ -9,6 +9,8 @@ UNRELEASED
     this is a diagnostic estimate, not playback A/V synchronisation
   * CHANGED: Player hardware pipeline tests use test_support's Pyxrun,
     with deadlines, retained logs and xSCOPE I/O
+  * FIXED: Both player pipeline fixtures default to the AIV board's XL1 xSCOPE
+    target instead of the stock XL0 target; MPEG hardware runs no longer need JTAG output
   * CHANGED: The player's MP2 decode/discard path selects saturating S32 PCM and
     the XS3 synthesis window; float remains selectable and the library default
   * ADDED: Integer peak-meter arithmetic and format-specific audio checksums,
