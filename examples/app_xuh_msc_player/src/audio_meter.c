@@ -30,17 +30,28 @@ void audio_meter_publish(unsigned left, unsigned right)
     published = (left << 8) | right;
 }
 
-unsigned audio_meter_level(float peak)
+static unsigned level_q16(unsigned value)
 {
-    if (!(peak > 0)) return 0;
-    if (peak >= 1) return AUDIO_METER_BAR_WIDTH;
-    unsigned value = (unsigned)(peak * (1u << FULL_SCALE_BIT));
+    if (value >= (1u << FULL_SCALE_BIT)) return AUDIO_METER_BAR_WIDTH;
     if (value < (1u << FLOOR_BIT)) return 0;
     /* Whole octaves from the top set bit; a straight line within the octave. */
     unsigned bit = FULL_SCALE_BIT - 1;
     while (!(value >> bit)) --bit;
     return (bit - FLOOR_BIT) * PIXELS_PER_OCTAVE +
            (((value - (1u << bit)) * PIXELS_PER_OCTAVE) >> bit);
+}
+
+unsigned audio_meter_level(float peak)
+{
+    if (!(peak > 0)) return 0;
+    if (peak >= 1) return AUDIO_METER_BAR_WIDTH;
+    return level_q16((unsigned)(peak * (1u << FULL_SCALE_BIT)));
+}
+
+unsigned audio_meter_level_s32(unsigned peak)
+{
+    if (peak >= 0x7fffffffu) return AUDIO_METER_BAR_WIDTH;
+    return level_q16(peak >> (31 - FULL_SCALE_BIT));
 }
 
 static void fill(unsigned char *frame, unsigned x, unsigned y,

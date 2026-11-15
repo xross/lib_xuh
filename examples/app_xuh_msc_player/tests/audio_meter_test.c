@@ -29,9 +29,14 @@ static void check_levels(void)
     assert(audio_meter_level(1.0f / 256) == 0);                        /* -48 dB */
     assert(audio_meter_level(1.0f / 128) == 11);
     assert(audio_meter_level(0.001f) == 0);
+    assert(audio_meter_level_s32(0) == 0);
+    assert(audio_meter_level_s32(0x7fffffff) == AUDIO_METER_BAR_WIDTH);
+    assert(audio_meter_level_s32(0x80000000u) == AUDIO_METER_BAR_WIDTH);
+    assert(audio_meter_level_s32(0xffffffffu) == AUDIO_METER_BAR_WIDTH);
     unsigned previous = 0;
     for (unsigned i = 0; i <= 4096; ++i) {  /* Never decreases, never overruns. */
         unsigned level = audio_meter_level((float)i / 4096);
+        assert(audio_meter_level_s32(i << 19) == level);
         assert(level >= previous && level <= AUDIO_METER_BAR_WIDTH);
         previous = level;
     }

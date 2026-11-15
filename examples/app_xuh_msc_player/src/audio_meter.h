@@ -39,6 +39,8 @@ typedef struct {
 /* Bar length, 0..AUDIO_METER_BAR_WIDTH, for a peak sample magnitude where 1.0
  * is full scale: 11 pixels for each halving, so about -48 dB is empty. */
 unsigned audio_meter_level(float peak);
+/* Same scale from an unsigned S32 magnitude (2^31 is full scale); no FP. */
+unsigned audio_meter_level_s32(unsigned peak);
 
 /* Audio task: publish the levels of the block just decoded. The meter and the
  * audio task are on one tile; nothing waits. */

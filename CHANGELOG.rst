@@ -4,6 +4,10 @@ lib_xuh change log
 UNRELEASED
 ----------
 
+  * CHANGED: The player's MP2 decode/discard path selects saturating S32 PCM and
+    the XS3 synthesis window; float remains selectable and the library default
+  * ADDED: Integer peak-meter arithmetic and format-specific audio checksums,
+    with the same 28-KiB audio arena
   * ADDED: ``app_xuh_msc_bench`` example: raw block and FatFs file read rates of
     a mass storage device
   * CHANGED: The player's ``mpeg1_audio`` configuration plays

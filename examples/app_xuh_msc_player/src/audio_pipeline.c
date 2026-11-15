@@ -48,8 +48,19 @@ void audio_pipeline_stop(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
 
 #if AUDIO_METER_ENABLED
 /* Peak magnitude of each channel of one decoded block, for the on-screen meter. */
-static void publish_levels(const float *samples)
+static void publish_levels(const mpeg_audio_sample_t *samples)
 {
+#if MPEG_AUDIO_FORMAT == MPEG_AUDIO_FORMAT_S32
+    unsigned peak[2] = {0, 0};
+    for (unsigned i = 0; i < 2 * MPEG_AUDIO_FRAME_SAMPLES; i += 2) {
+        /* Unsigned subtraction also handles INT32_MIN without signed overflow. */
+        unsigned left = samples[i] < 0 ? 0u - (unsigned)samples[i] : (unsigned)samples[i];
+        unsigned right = samples[i + 1] < 0 ? 0u - (unsigned)samples[i + 1] : (unsigned)samples[i + 1];
+        if (left > peak[0]) peak[0] = left;
+        if (right > peak[1]) peak[1] = right;
+    }
+    audio_meter_publish(audio_meter_level_s32(peak[0]), audio_meter_level_s32(peak[1]));
+#else
     float peak[2] = {0, 0};
     for (unsigned i = 0; i < 2 * MPEG_AUDIO_FRAME_SAMPLES; i += 2) {
         float left = samples[i] < 0 ? -samples[i] : samples[i];
@@ -58,6 +69,7 @@ static void publish_levels(const float *samples)
         if (right > peak[1]) peak[1] = right;
     }
     audio_meter_publish(audio_meter_level(peak[0]), audio_meter_level(peak[1]));
+#endif
 }
 #endif
 

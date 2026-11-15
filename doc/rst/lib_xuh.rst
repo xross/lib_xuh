@@ -439,6 +439,8 @@ at once, falls two pixels a frame and carries a white peak-hold tick. The audio
 task publishes the peak of each decoded MP2 block to the display task, on the
 same tile, without a channel. The audio is still neither played nor synchronised
 with the video: the meter shows the level of the audio most recently decoded.
+With S32 PCM the peak scan and logarithmic meter scale use integer arithmetic;
+there is no per-sample conversion to float.
 
 For MPEG, the white tick marks the nominal frame rate read from the stream's
 sequence header, rounded to tenths for display positioning. The bar's colour
@@ -452,6 +454,18 @@ The program-stream player supports MPEG-1 pack/PES headers, video stream 0xe0
 and MP2 audio stream 0xc0. It skips other packet types and rejects MPEG-2 pack
 headers. Timestamps are not used. MP2 PCM is decoded on tile 0 and discarded;
 there is no physical audio output or A/V synchronisation.
+The player selects S32 PCM with the XS3 vector synthesis window by default;
+``lib_mpeg`` itself still defaults to float. The player's ``mpeg_conf.h`` sets
+``MPEG_AUDIO_FORMAT``; change it to ``MPEG_AUDIO_FORMAT_FLOAT`` for the float
+decode/discard path. Both use the same 28-KiB audio arena. The checksum is over
+PCM bits, so float and S32 have different reference checksums: on all 5042 audio
+blocks of the reference soundtrack these are ``c99be1a4`` and ``6dd94600``
+respectively. S32 uses symmetric saturation at full scale, not wrapping.
+Full 3026-picture/5042-block hardware runs verified both checksums, zero errors
+and video-arena cleanup. Float took 3.316 ms/audio block and S32 2.152 ms/block
+including the meter/checksum work in the player's accounting; throughput was
+39.83 and 40.56 FPS respectively. These are single integrated runs, not standalone
+decoder timings or a guaranteed FPS improvement.
 
 Audio crosses tiles in chunks of at most 1024 bytes. Each chunk is acknowledged
 after consumption, including bypass and latched-error paths, before the producer
