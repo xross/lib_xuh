@@ -28,14 +28,24 @@ def main():
         raise SystemExit("FFmpeg produced fewer than three MP2 frames")
     fixture.write_bytes(data[:1728])
     if args.adapter_id:
-        command = ["xrun", "--adapter-id", args.adapter_id, "--io", str(args.xe.resolve())]
+        import Pyxrun
+        from hardware_output import HardwareOutput
+
+        # Full xSCOPE (the default), not I/O only: short.mp2 is read with host-file
+        # system calls. run() prints the output and keeps it in the log.
+        captured = HardwareOutput()
+        failed = not Pyxrun.run(args.xe.resolve(), captured, adapter_id=args.adapter_id, timeout=args.timeout,
+                                cwd=work, log_path=work / "run.log")
+        output = captured.text
     else:
-        command = ["xsim", "--max-cycles", "100000000", str(args.xe.resolve())]
-    result = subprocess.run(command, cwd=work, capture_output=True, text=True, timeout=args.timeout)
-    output = result.stdout + result.stderr
-    (work / "run.log").write_text(output)
-    print(output, end="")
-    if result.returncode or "PASS: audio pipeline 8 cases;" not in output:
+        command = ["xsim", "--max-cycles", "100000000", "--xscope",
+                   f"-offline {work / 'audio-pipeline.vcd'}", str(args.xe.resolve())]
+        result = subprocess.run(command, cwd=work, capture_output=True, text=True, timeout=args.timeout)
+        output = result.stdout + result.stderr
+        (work / "run.log").write_text(output)
+        failed = result.returncode != 0
+        print(output, end="")
+    if failed or "PASS: audio pipeline 8 cases;" not in output:
         raise SystemExit("Audio pipeline did not complete all eight cases")
 
 

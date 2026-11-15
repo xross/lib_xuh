@@ -86,30 +86,40 @@ def main():
     (work / "ALTHASHES.TXT").write_text("\n".join(alternate) + "\n")
     # Host-file syscalls still need JTAG servicing; --xscope-io-only would
     # leave fopen/fread blocked even though terminal writes use xSCOPE.
-    command = (["xrun", "--adapter-id", args.adapter_id, "--io" if args.jtag else "--xscope", args.xe.resolve()]
-               if args.adapter_id else
-               ["xsim", "--max-cycles", "1500000000", "--xscope", "-offline pipeline.xmt", args.xe.resolve()])
-    log_path = work / ("xrun.log" if args.adapter_id else "xsim.log")
-    try:
-        log = run(command, cwd=work, timeout=args.timeout)
-    except subprocess.TimeoutExpired as error:
-        partial = (error.stdout or b"") + (error.stderr or b"")
-        if isinstance(partial, bytes):
-            partial = partial.decode(errors="replace")
-        log_path.write_text(partial)
-        raise SystemExit(f"FAIL: pipeline exceeded {args.timeout} host seconds; no completion established") from error
-    log_path.write_text(log)
-    print(log, end="")
+    if args.adapter_id:
+        import Pyxrun
+        from hardware_output import HardwareOutput
+
+        # Full xSCOPE (the default), not I/O only: the fixture is read with host-file
+        # system calls. run() prints the output and keeps it in the log.
+        captured = HardwareOutput()
+        if not Pyxrun.run(args.xe.resolve(), captured, adapter_id=args.adapter_id, timeout=args.timeout,
+                          attach="io" if args.jtag else "xscope", cwd=work, log_path=work / "xrun.log"):
+            raise SystemExit("FAIL: pipeline did not run to completion")
+        log = captured.text
+    else:
+        command = ["xsim", "--max-cycles", "1500000000", "--xscope", "-offline pipeline.xmt", args.xe.resolve()]
+        log_path = work / "xsim.log"
+        try:
+            log = run(command, cwd=work, timeout=args.timeout)
+        except subprocess.TimeoutExpired as error:
+            partial = (error.stdout or b"") + (error.stderr or b"")
+            if isinstance(partial, bytes):
+                partial = partial.decode(errors="replace")
+            log_path.write_text(partial)
+            raise SystemExit(f"FAIL: pipeline exceeded {args.timeout} host seconds; no completion established") from error
+        log_path.write_text(log)
+        print(log, end="")
     marker = "PASS: MPEG pipeline repeat, EOF drain, open/read/empty errors and recovery"
     if marker not in log or log.count("PASS: pipeline play=") != 7:
         raise SystemExit("FAIL: incomplete pipeline test")
     if log.count(f"source rate={args.rate}/1 FPS") != (4 if args.rate == 25 else 3):
         raise SystemExit("FAIL: missing source frame-rate metadata")
     for stage in ("Receive YUV / wait", "YUV -> RGB565"):
-        if not re.search(rf"^\s+{re.escape(stage)}\s+0\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
+        if not re.search(rf"^\s*{re.escape(stage)}\s+0\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
             raise SystemExit(f"FAIL: missing tile-0 timing for {stage}")
     for stage, tile in (("Send YUV / backpressure", "1 -> 0"), ("Wait receiver ack", "1")):
-        if not re.search(rf"^\s+{re.escape(stage)}\s+{re.escape(tile)}\s+[1-9][0-9]*\s*$",
+        if not re.search(rf"^\s*{re.escape(stage)}\s+{re.escape(tile)}\s+[1-9][0-9]*\s*$",
                          log, re.MULTILINE):
             raise SystemExit(f"FAIL: missing sender timing for {stage}")
     for values, count in ((hashes, 3), (alternate, 1)):

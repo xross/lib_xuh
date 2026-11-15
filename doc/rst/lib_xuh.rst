@@ -495,7 +495,8 @@ Full 3026-picture/5042-block hardware runs verified both checksums, zero errors
 and video-arena cleanup. Float took 3.316 ms/audio block and S32 2.152 ms/block
 including the meter/checksum work in the player's accounting; throughput was
 39.83 and 40.56 FPS respectively. These are single integrated runs, not standalone
-decoder timings or a guaranteed FPS improvement.
+decoder timings or a guaranteed FPS improvement. The library's hardware runner
+accepts ``--audio-checksum`` to enforce the appropriate format-specific reference.
 
 Audio crosses tiles in chunks of at most 1024 bytes. Each chunk is acknowledged
 after consumption, including bypass and latched-error paths, before the producer
@@ -711,6 +712,7 @@ draining after a latched error and restart. The runner generates three MP2
 frames with FFmpeg and requires normal termination and the checked success
 marker::
 
+    python -m pip install -r requirements-hardware.txt
     cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_audio_pipeline \
       -B build-audio-pipeline
     xmake -C build-audio-pipeline -j 8
@@ -718,9 +720,30 @@ marker::
       --xe build-audio-pipeline/bin/test_audio_pipeline.xe \
       --work build-audio-pipeline/fixtures --adapter-id SERIAL --timeout 60
 
+Hardware pipeline runners use ``Pyxrun`` from ``test_support`` for
+deadlines, process cleanup and retained logs. Hardware pass criteria use
+stdout only, not diagnostic stderr. Reserve the selected board externally and
+hold the reservation until the runner returns; ``Pyxrun`` does not reserve it.
+The simulator tests use ``Pyxsim``. ``requirements-hardware.txt`` installs a
+pinned development revision of ``test_support`` into the active venv; it requires
+SSH access to that repository. Replace it with an upstream release when available.
+Native tests do not require it.
+
+The test uses xSCOPE text I/O on hardware; configure ``APP_HW_TARGET`` to the
+board's XN (the test includes ``XK-EVK-XU316-AIV.xn`` for AIV/XL1).
 Omit ``--adapter-id`` to simulate with cycle and host-time bounds. This fixture
 uses JTAG host-file I/O, not USB or a physical audio interface, and is not a
 throughput benchmark.
+
+``examples/app_xuh_msc_player/tests/sim`` holds simulator tests run by pytest
+with ``test_support``. ``test_audio_meter.py`` checks the integer level meter
+against the float one for random peaks. Each case builds the configuration it is
+about to run, one for each peak width in ``params.json``, with a random seed
+written to a generated header; ``--seed`` reproduces a run::
+
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/sim/test_audio_meter \
+      -B examples/app_xuh_msc_player/tests/sim/build
+    python -m pytest examples/app_xuh_msc_player/tests/sim -v
 
 MPEG decoder accuracy, MP2 arithmetic/PCM reference checks and player benchmark
 runners belong to ``lib_mpeg``. With that library's Python venv
