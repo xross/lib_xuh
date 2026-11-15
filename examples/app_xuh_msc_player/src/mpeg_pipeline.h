@@ -2,6 +2,7 @@
 #define MPEG_PIPELINE_H_
 #include "jpeg_pipeline.h"
 #include "video_window.h"
+#include "decode_lead.h"
 
 /* MPEG_INPUT_WAIT_US is the time the decoder spent blocked waiting for the
  * loader: with read-ahead it, not the loader's own read time, is what storage
@@ -25,6 +26,10 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image);
 void mpeg_pipeline_receive(chanend c_image, chanend c_render);
 unsigned mpeg_pipeline_check_lcd(unsigned slot);
 video_window_t mpeg_pipeline_lcd_window(unsigned slot);
+#if DECODE_LEAD_ENABLED
+/* End-of-frame media position, owned and published with the RGB slot. */
+unsigned mpeg_pipeline_lcd_video_ms(unsigned slot);
+#endif
 #ifdef __XC__
 unsigned char * unsafe mpeg_pipeline_lcd_buffer(unsigned slot);
 #else

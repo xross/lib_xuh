@@ -15,6 +15,13 @@ add_executable(mpeg_ps_demux mpeg_ps_demux.c ../src/mpeg_ps_reader.c)
 add_executable(fps_overlay_test fps_overlay_test.c ../src/fps_overlay.c)
 add_executable(video_window_test video_window_test.c ../src/fps_overlay.c)
 add_executable(audio_meter_test audio_meter_test.c ../src/audio_meter.c)
+add_executable(decode_lead_test decode_lead_test.c ../src/decode_lead.c)
+add_executable(decode_lead_off_test decode_lead_test.c ../src/decode_lead.c)
+foreach(target decode_lead_test decode_lead_off_test)
+    target_compile_definitions(${target} PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
+        APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1 APP_XUH_MSC_PLAYER_MPEG_AUDIO=1)
+endforeach()
+target_compile_definitions(decode_lead_off_test PRIVATE APP_XUH_MSC_PLAYER_DECODE_LEAD=0)
 target_compile_definitions(audio_meter_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1 APP_XUH_MSC_PLAYER_MPEG_AUDIO=1)
 add_executable(frame_timing_test frame_timing_test.c)
@@ -25,7 +32,7 @@ target_compile_definitions(fps_overlay_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JP
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
 target_compile_definitions(video_window_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
-foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test audio_meter_test frame_timing_test activity_led_test mjpeg_reader_test)
+foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test audio_meter_test decode_lead_test decode_lead_off_test frame_timing_test activity_led_test mjpeg_reader_test)
     target_include_directories(${target} PRIVATE ../src)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     if(APP_TEST_SANITIZE)

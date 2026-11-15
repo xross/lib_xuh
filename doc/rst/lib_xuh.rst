@@ -325,6 +325,9 @@ benchmark configuration:
    * - ``APP_XUH_MSC_PLAYER_AUDIO_METER``
      - ``ON``
      - In ``mpeg1_audio``, draw a stereo level meter for the decoded audio
+   * - ``APP_XUH_MSC_PLAYER_DECODE_LEAD``
+     - ``ON``
+     - In ``mpeg1_audio``, show estimated audio decode lead over displayed video
    * - ``APP_XUH_MSC_PLAYER_MPEG_FILE``
      - Empty
      - Override the MPEG root filename; the defaults remain configuration-specific
@@ -441,6 +444,33 @@ same tile, without a channel. The audio is still neither played nor synchronised
 with the video: the meter shows the level of the audio most recently decoded.
 With S32 PCM the peak scan and logarithmic meter scale use integer arithmetic;
 there is no per-sample conversion to float.
+
+Between the two meters, the ``DEC`` gauge occupies (110, 4) through (209, 25).
+It estimates **audio decode lead**, not lip-sync: decoded audio duration minus
+the end-of-frame media position of the picture just transferred to the LCD.
+Positive milliseconds mean audio decoding is ahead (right of centre); negative
+mean it is behind (left). The bar spans -1000 to +1000 ms and clamps at the ends;
+the signed numeric reading continues to 9999 ms, with ``>`` marking larger
+magnitudes. Colours indicate magnitude: green through 40 ms, amber through
+100 ms, then red. These are diagnostic bands, not lip-sync tolerances.
+
+Audio duration comes from decoded samples and their sample rate. Video duration
+uses the exact sequence-header frame-rate rational, including 24000/1001 and
+30000/1001; sub-millisecond remainders are retained rather than rounded each
+frame or block. Both positions refer to the end of their block/frame and assume
+aligned stream starts. PES timestamps and initial stream offsets are not used.
+This is neither audio playback timing nor the panel's physical scanout timing.
+The unsmoothed value intentionally exposes demux bursts and buffering.
+
+The LCD task samples audio progress after each picture's SPI transfer and draws
+the gauge from a separate 4400-byte buffer, leaving video-slot integrity checks
+unchanged. It refreshes the fixed rectangle even when outside a smaller picture.
+Before the first decoded block, or after an audio error, it shows dashes rather
+than a misleading zero. The last audio position remains available while video
+drains; each new play resets it. Disable with
+``-DAPP_XUH_MSC_PLAYER_DECODE_LEAD=OFF`` for baseline throughput comparisons.
+The gauge is also compiled out for demux-only, video-only and JPEG builds,
+independently of the stereo level meter and FPS-overlay options.
 
 For MPEG, the white tick marks the nominal frame rate read from the stream's
 sequence header, rounded to tenths for display positioning. The bar's colour
@@ -647,8 +677,11 @@ for headline throughput measurements.
 Validation
 ----------
 
-Application-owned PS-reader, MJPEG-reader, activity-LED, FPS-overlay and
-frame-timing tests run natively, with ASan, UBSan and assertions enabled. The
+Application-owned PS-reader, MJPEG-reader, activity-LED, FPS-overlay,
+audio-meter, decode-lead and frame-timing tests run natively, with ASan, UBSan
+and assertions enabled. Decode-lead tests cover fractional media clocks,
+positive/negative offsets, startup/reset validity, rollover, drawing bounds,
+scale/text overflow and the disabled configuration. The
 suite also checks the profile parser and compares demultiplexed video/audio
 bytes against FFmpeg for generated I/P, I/P/B and video-only program streams.
 FFmpeg and a sibling ``lib_fatfs`` checkout (including its FatFs submodule) are

@@ -5,6 +5,7 @@
 #include "jpeg_pipeline.h"
 #include "mpeg_audio.h"
 #include "audio_meter.h"
+#include "decode_lead.h"
 
 /* The MP2 decoder is lib_mpeg's; this task owns its memory. */
 static unsigned char audio_memory[MPEG_AUDIO_MEMORY_SIZE] __attribute__((aligned(8)));
@@ -82,10 +83,16 @@ void mp2_audio_task(chanend channel)
     unsigned payload[AUDIO_CHUNK_BYTES / 4];
     for (;;) {
         unsigned header[2], stats[AUDIO_STATS_WORDS] = {0};
+#if DECODE_LEAD_ENABLED
+        decode_lead_clock_t media_clock = {0};
+#endif
         pipeline_receive(channel, header, 2);
         if (header[0] != AUDIO_START) __builtin_trap();
         unsigned decode = header[1], result = decode &&
             mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
+#if DECODE_LEAD_ENABLED
+        decode_lead_publish(0, 0);
+#endif
         pipeline_send(channel, &result, 1);
         if (result) ++stats[AUDIO_ERRORS];
 #if AUDIO_METER_ENABLED
@@ -115,6 +122,10 @@ void mp2_audio_task(chanend channel)
                         ++stats[AUDIO_BLOCKS];
                         stats[AUDIO_SAMPLES] += MPEG_AUDIO_FRAME_SAMPLES;
                         stats[AUDIO_RATE] = frame.sample_rate;
+#if DECODE_LEAD_ENABLED
+                        decode_lead_advance(&media_clock, MPEG_AUDIO_FRAME_SAMPLES, frame.sample_rate);
+                        decode_lead_publish(media_clock.ms, 1);
+#endif
                         /* Full PCM comparison belongs to the codec reference
                          * test, not the player's timing path. */
                         unsigned bits;
@@ -128,6 +139,9 @@ void mp2_audio_task(chanend channel)
                     if (next < 0) ++stats[AUDIO_ERRORS];
                 }
             }
+#if DECODE_LEAD_ENABLED
+            if (stats[AUDIO_ERRORS]) decode_lead_publish(0, 0);
+#endif
             /* END releases the route; separate messages can arrive out of
              * order without acknowledgement. Cover bypass/error paths too,
              * so the producer can still finish and send STOP. */
@@ -139,6 +153,10 @@ void mp2_audio_task(chanend channel)
             stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
             mpeg_audio_close();
         }
+#if DECODE_LEAD_ENABLED
+        /* Keep the final audio position available while buffered video drains. */
+        if (stats[AUDIO_ERRORS]) decode_lead_publish(0, 0);
+#endif
 #if AUDIO_METER_ENABLED
         audio_meter_publish(0, 0);
 #endif

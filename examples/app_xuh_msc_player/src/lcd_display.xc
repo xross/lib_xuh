@@ -9,6 +9,7 @@
 #include "mpeg_pipeline.h"
 #include "fps_overlay.h"
 #include "audio_meter.h"
+#include "decode_lead.h"
 
 #define LCD_WIDTH        PIPELINE_LCD_WIDTH
 #define LCD_HEIGHT       PIPELINE_LCD_HEIGHT
@@ -254,6 +255,9 @@ static void lcd_write_video_row(client spi_master_if spi,
 static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 {
     unsigned expected = 0;
+#if DECODE_LEAD_ENABLED
+    unsigned char lead_pixels[DECODE_LEAD_WIDTH * DECODE_LEAD_HEIGHT * 2];
+#endif
 #if MSC_MPEG_PIPELINE
     unsigned previous_width = LCD_WIDTH, previous_height = LCD_HEIGHT;
 #endif
@@ -296,6 +300,18 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
                 lcd_write_video_row(spi,
                     (const uint8_t *)(buffer + video_window_rgb_offset(window, y)), window.width * 2);
             spi.end_transaction(0);
+#if DECODE_LEAD_ENABLED
+            /* Sample only after the picture's SPI transfer completes. The
+             * gauge has its own small buffer; verified video slots stay intact. */
+            decode_lead_draw(lead_pixels, mpeg_pipeline_lcd_video_ms(slot));
+            lcd_begin_window(spi, DECODE_LEAD_X, DECODE_LEAD_Y,
+                             DECODE_LEAD_X + DECODE_LEAD_WIDTH - 1,
+                             DECODE_LEAD_Y + DECODE_LEAD_HEIGHT - 1);
+            for (unsigned y = 0; y < DECODE_LEAD_HEIGHT; ++y)
+                spi.transfer_array((const uint8_t *)&lead_pixels[y * DECODE_LEAD_WIDTH * 2],
+                                   null, DECODE_LEAD_WIDTH * 2);
+            spi.end_transaction(0);
+#endif
 #if MSC_MPEG_PIPELINE && APP_XUH_MSC_PLAYER_FPS_OVERLAY
             /* The gauge is drawn in screen coordinates. If any of it lies
              * outside the video, refresh its fixed rectangle separately. */

@@ -4,6 +4,9 @@ lib_xuh change log
 UNRELEASED
 ----------
 
+  * ADDED: Optional signed audio decode-lead gauge in ``app_xuh_msc_player``,
+    comparing decoded audio duration with video transferred to the LCD;
+    this is a diagnostic estimate, not playback A/V synchronisation
   * CHANGED: The player's MP2 decode/discard path selects saturating S32 PCM and
     the XS3 synthesis window; float remains selectable and the library default
   * ADDED: Integer peak-meter arithmetic and format-specific audio checksums,
