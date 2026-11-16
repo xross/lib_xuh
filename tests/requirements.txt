@@ -1,0 +1,3 @@
+# Development revision providing the shared build/run APIs and simulator cleanup.
+test_support @ git+ssh://git@github.com/xross-work/test_support.git@3c2ac7a13dbceb2c629de7e5a582218bd67bfa52
+pytest==8.3.5

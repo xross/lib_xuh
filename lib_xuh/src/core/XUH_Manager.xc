@@ -141,7 +141,14 @@ extern clock rx_usb_clk;
 #define STATE_VM   2
 
 // 100ms debounce
+#ifdef XUH_SIM_CONNECT_DEBOUNCE_US
+#ifndef XUD_SIM_XSIM
+#error XUH_SIM_CONNECT_DEBOUNCE_US is only for simulator tests
+#endif
+#define CONNECT_DEBOUNCE (XUH_SIM_CONNECT_DEBOUNCE_US * 100)
+#else
 #define CONNECT_DEBOUNCE (100000 * 100)
+#endif
 
 void XUD_HAL_EnableUsb(unsigned pwrConfig);
 void XUD_HAL_Mode_Signalling(void);
