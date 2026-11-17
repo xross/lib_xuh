@@ -93,8 +93,8 @@ static void decode_play(chanend c_load, chanend c_output)
             ++errors;
         }
         /* Input may now be overwritten; all decoding of it is finished. */
-        unsigned ack[2] = {sequence, pending ? 0 : 1};
-        pipeline_send(c_load, ack, 2);
+        unsigned ack = VIDEO_LOADER_ACK(sequence, !pending);
+        pipeline_send(c_load, &ack, 1);
     }
 
     if (pending) {

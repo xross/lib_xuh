@@ -35,6 +35,12 @@ unsigned char * unsafe mpeg_pipeline_lcd_buffer(unsigned slot);
 #else
 unsigned char *mpeg_pipeline_lcd_buffer(unsigned slot);
 unsigned char *mpeg_pipeline_input_buffer(unsigned slot);
+/* Loader, on the decoder's tile, when audio is paced. In the video's time,
+ * where zero is the first picture; pass valid 0 before startup or on failure.
+ * Clock: the audio played so far, in reference-timer ticks, is this tile's
+ * get_reference_time() less offset. The decoder holds each picture until then.
+ * Underflow does not invalidate/restart this clock. */
+void mpeg_pipeline_audio_clock(unsigned offset, unsigned valid);
 #endif
 #endif
 #endif

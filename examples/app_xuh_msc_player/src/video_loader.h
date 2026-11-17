@@ -11,9 +11,13 @@
  *
  * Loader -> decoder: ready [slot, sequence, bytes], finally stop
  *                    [PIPELINE_STOP, error, 0].
- * Decoder -> loader: ack [sequence, failed] once it no longer reads that slot;
- *                    after stop, PIPELINE_LOADER_STATS_WORDS statistics.
- * The loader receives the previous unit's ack before publishing the next. */
+ * Decoder -> loader: ack [(sequence << 1) | failed] once it no longer reads
+ *                    that slot; after stop, PIPELINE_LOADER_STATS_WORDS statistics.
+ * The loader receives the previous unit's ack before publishing the next.
+ * The ack is one word so that, with its END token, it fits the eight tokens a
+ * channel end buffers: the decoder can send it while the loader is still busy
+ * and carry on, then wait for the next unit together with other events. */
+#define VIDEO_LOADER_ACK(sequence, failed) (((sequence) << 1) | ((failed) ? 1u : 0u))
 /* xcore needs every indirect call grouped with its possible targets to size
  * stacks. Declare each source callback with the matching VIDEO_SOURCE_* macro. */
 #ifdef __xcore__

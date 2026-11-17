@@ -92,10 +92,24 @@ PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data
     return rc;
 }
 
+static void publish_audio_timing(void)
+{
+    unsigned offset;
+    int audio_start_ms;
+    unsigned have_start = mpeg_ps_audio_start(&mpeg_ps, &audio_start_ms);
+    if (have_start && audio_pipeline_clock(&offset))
+        mpeg_pipeline_audio_clock(offset - (unsigned)audio_start_ms * 100000u, 1);
+    else
+        mpeg_pipeline_audio_clock(0, 0);
+}
+
 PS_AUDIO_CALLBACK static int mpeg_ps_audio_send(void *context,
                                                const unsigned char *data, unsigned bytes)
 {
-    return audio_pipeline_send(*(chanend *)context, data, bytes);
+    int result = audio_pipeline_send(*(chanend *)context, data, bytes);
+    /* Publish the startup clock even if demux has not returned video yet. */
+    publish_audio_timing();
+    return result;
 }
 #else
 #ifndef APP_XUH_MSC_PLAYER_MPEG_FILE
@@ -113,6 +127,7 @@ VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
     memset(audio_stats, 0, sizeof(audio_stats));
     if (!rc) {
         mpeg_ps_init(&mpeg_ps, mpeg_ps_disk_read, &mpeg_file);
+        mpeg_pipeline_audio_clock(0, 0);
         if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_MSC_PLAYER_AUDIO_DECODE)) {
             audio_pipeline_stop(mpeg_audio_channel, audio_stats);
             f_close(&mpeg_file);
@@ -130,6 +145,7 @@ VIDEO_SOURCE_READ static int mpeg_source_read(void *context, unsigned char *dest
     int result = mpeg_ps_read_video(&mpeg_ps, destination, capacity, bytes,
                                     mpeg_ps_audio_send, &mpeg_audio_channel);
     mpeg_bytes += *bytes;
+    publish_audio_timing();
     return result;
 #else
     UINT count = 0;
@@ -148,7 +164,8 @@ VIDEO_SOURCE_CLOSE static int mpeg_source_close(void *context)
     int rc = f_close(&mpeg_file);
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     audio_pipeline_stop(mpeg_audio_channel, audio_stats);
-    if (audio_stats[AUDIO_ERRORS]) return -1;
+    if (audio_stats[AUDIO_ERRORS] ||
+        (APP_XUH_MSC_PLAYER_PACING_STRICT && audio_stats[AUDIO_UNDERFLOWS])) return -1;
 #endif
     return rc;
 }
@@ -159,7 +176,9 @@ static int play_mpeg1(chanend c_load, unsigned number)
         MPEG_FILE_NAME, NULL, mpeg_source_open, mpeg_source_read, mpeg_source_close,
         mpeg_pipeline_input_buffer, MPEG_LOAD_BYTES };
     static video_play_t play;
-    printf("Play %u: MPEG-1 at full speed (no pacing or dropped frames)...\n", number);
+    printf("Play %u: MPEG-1 %s...\n", number,
+           APP_XUH_MSC_PLAYER_MPEG_AUDIO && APP_XUH_MSC_PLAYER_AUDIO_DECODE &&
+           APP_XUH_MSC_PLAYER_AUDIO_PACED ? "paced to audio clock" : "at full speed");
     video_loader_play(c_load, &source, &play);
     const unsigned *stats = play.stats;
     unsigned frames = stats[PIPELINE_FRAMES];
@@ -172,7 +191,16 @@ static int play_mpeg1(chanend c_load, unsigned number)
            APP_XUH_MSC_PLAYER_AUDIO_DECODE ? "decode/discard" : "demux only",
            audio_stats[AUDIO_BYTES], audio_stats[AUDIO_BLOCKS], audio_stats[AUDIO_SAMPLES],
            audio_stats[AUDIO_RATE], audio_stats[AUDIO_ERRORS], audio_stats[AUDIO_PEAK],
-           audio_stats[AUDIO_CHECKSUM]);
+            audio_stats[AUDIO_CHECKSUM]);
+    printf("MP2 underflows: count=%u held_samples/channel=%u held_ms=%u dropped_samples/channel=%u strict=%u\n",
+           audio_stats[AUDIO_UNDERFLOWS], audio_stats[AUDIO_HELD_SAMPLES],
+           audio_stats[AUDIO_RATE] ? (unsigned)((unsigned long long)audio_stats[AUDIO_HELD_SAMPLES] *
+               1000 / audio_stats[AUDIO_RATE]) : 0,
+           audio_stats[AUDIO_DROPPED_SAMPLES], (unsigned)APP_XUH_MSC_PLAYER_PACING_STRICT);
+    if (audio_stats[AUDIO_UNDERFLOWS])
+        printf("MP2 first underflow: sample=%u time_ms=%u\n", audio_stats[AUDIO_FIRST_UNDERFLOW],
+               (unsigned)((unsigned long long)audio_stats[AUDIO_FIRST_UNDERFLOW] * 1000 /
+                          audio_stats[AUDIO_RATE]));
     printf("MP2 total decode: %u us; average %u us/block\n",
            audio_stats[AUDIO_DECODE_US], audio_stats[AUDIO_BLOCKS] ?
            audio_stats[AUDIO_DECODE_US] / audio_stats[AUDIO_BLOCKS] : 0);

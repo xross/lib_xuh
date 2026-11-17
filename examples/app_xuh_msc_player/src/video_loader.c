@@ -8,7 +8,7 @@
 
 void video_loader_play(chanend c_load, const video_source_t *source, video_play_t *play)
 {
-    unsigned pending = 0, ack[2];
+    unsigned pending = 0, ack;
     memset(play, 0, sizeof(*play));
     int open_rc = source->open(source->context);
     printf("%s open: rc=%d\n", source->name, open_rc);
@@ -23,9 +23,9 @@ void video_loader_play(chanend c_load, const video_source_t *source, video_play_
         /* While the alternate buffer was being filled, the decoder consumed
          * the previous unit. It must release ownership before publication. */
         if (pending) {
-            pipeline_receive(c_load, ack, 2);
+            pipeline_receive(c_load, &ack, 1);
             pending = 0;
-            if (ack[0] != play->units - 1 || ack[1]) play->failed = 1;
+            if (ack != VIDEO_LOADER_ACK(play->units - 1, 0)) play->failed = 1;
         }
         if (result < 0) {
             printf("%s: read/format/capacity error at unit %u, bytes=%u\n",
@@ -46,8 +46,8 @@ void video_loader_play(chanend c_load, const video_source_t *source, video_play_
         if (close_rc) { printf("%s close: rc=%d\n", source->name, close_rc); play->failed = 1; }
     }
     if (pending) {
-        pipeline_receive(c_load, ack, 2);
-        if (ack[0] != play->units - 1 || ack[1]) play->failed = 1;
+        pipeline_receive(c_load, &ack, 1);
+        if (ack != VIDEO_LOADER_ACK(play->units - 1, 0)) play->failed = 1;
     }
     unsigned stop[3] = {PIPELINE_STOP, play->failed, 0};
     pipeline_send(c_load, stop, 3);
