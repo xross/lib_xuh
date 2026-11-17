@@ -41,16 +41,19 @@ void video_loader_play(chanend c_load, const video_source_t *source, video_play_
         play->elapsed_ticks += (unsigned)(now - previous);
         previous = now;
     }
-    if (!open_rc) {
-        int close_rc = source->close(source->context);
-        if (close_rc) { printf("%s close: rc=%d\n", source->name, close_rc); play->failed = 1; }
-    }
     if (pending) {
         pipeline_receive(c_load, &ack, 1);
         if (ack != VIDEO_LOADER_ACK(play->units - 1, 0)) play->failed = 1;
     }
+    /* End the decoder's input before closing the source. The decoder needs the
+     * end to release its last pictures, and closing can take a while: an MPEG
+     * source plays out its buffered audio. */
     unsigned stop[3] = {PIPELINE_STOP, play->failed, 0};
     pipeline_send(c_load, stop, 3);
+    if (!open_rc) {
+        int close_rc = source->close(source->context);
+        if (close_rc) { printf("%s close: rc=%d\n", source->name, close_rc); play->failed = 1; }
+    }
     pipeline_receive(c_load, play->stats, PIPELINE_LOADER_STATS_WORDS);
     play->elapsed_ticks += (unsigned)(get_reference_time() - previous);
 }
