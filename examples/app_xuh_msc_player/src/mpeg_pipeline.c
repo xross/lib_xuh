@@ -443,8 +443,11 @@ static void receive_play(chanend c_image, chanend c_render)
         ++expected;
         unsigned slot = sequence & 1;
 #if DECODE_LEAD_ENABLED
+        /* Paced: when the picture starts, to compare with the audio played.
+         * Unpaced: when it ends, to compare with the audio decoded. */
+        if (APP_XUH_MSC_PLAYER_AUDIO_PACED) lcd_video_ms[slot] = video_clock.ms;
         decode_lead_advance(&video_clock, rate_den, rate_num);
-        lcd_video_ms[slot] = video_clock.ms;
+        if (!APP_XUH_MSC_PLAYER_AUDIO_PACED) lcd_video_ms[slot] = video_clock.ms;
 #endif
         video_window_t window = video_window_center(width, height);
         /* A slot is owned by this receiver until published to the renderer.

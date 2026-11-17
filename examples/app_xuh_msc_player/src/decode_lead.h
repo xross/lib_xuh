@@ -24,7 +24,15 @@
 enum { DECODE_LEAD_WIDTH = 100,
        DECODE_LEAD_HEIGHT = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 26 : 22,
        DECODE_LEAD_X = (PIPELINE_LCD_WIDTH - DECODE_LEAD_WIDTH) / 2,
-       DECODE_LEAD_Y = 4, DECODE_LEAD_RANGE_MS = 1000 };
+       DECODE_LEAD_Y = 4,
+       /* Paced, the gauge shows sync: the bar spans +/-60 ms, amber beyond
+        * 15 ms and red beyond 45 ms either way. Unpaced, it shows decode lead,
+        * which ranges much further. */
+       DECODE_LEAD_RANGE_MS = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 60 : 1000,
+       DECODE_LEAD_AMBER_MS = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 15 : 40,
+       DECODE_LEAD_RED_MS = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 45 : 100,
+       /* A tick stays at the largest reading of this many pictures. */
+       DECODE_LEAD_PEAK_PICTURES = 50 };
 
 typedef struct {
     unsigned ms, remainder, rate;
@@ -44,7 +52,8 @@ void decode_lead_advance(decode_lead_clock_t *state, unsigned units, unsigned ra
 void decode_lead_publish(unsigned ms, unsigned valid);
 unsigned decode_lead_read(unsigned *ms);
 
-/* Audio task publishes cumulative confirmed underflow episodes and held ms.
+/* Audio task publishes confirmed underflow episodes and missing-audio ms
+ * (DAC silence or stand-in hold; the historical parameter name is retained).
  * Two independent tile-local words: approximate display, never clock control. */
 void decode_lead_underflows_publish(unsigned count, unsigned held_ms);
 void decode_lead_underflows_read(unsigned *count, unsigned *held_ms);
@@ -53,10 +62,11 @@ void decode_lead_underflows_read(unsigned *count, unsigned *held_ms);
 int decode_lead_difference(unsigned audio_ms, unsigned video_ms);
 #endif
 
-/* LCD task: draw after transferring the picture. video_ms is the END of the
- * displayed frame. The audio position is the audio played when paced, and the
- * end of the last decoded block otherwise. No PTS offsets or panel-scan timing
- * are measured. */
+/* LCD task: draw after transferring the picture. When paced, video_ms is the
+ * START of the picture just written and the audio position is the audio played,
+ * both on the stream's timeline: zero means the picture reached the display as
+ * its audio played. Otherwise video_ms is the END of the picture and the audio
+ * position the end of the last decoded block. Panel scan-out is not measured. */
 #ifdef __XC__
 void decode_lead_draw(unsigned char * unsafe pixels, unsigned video_ms);
 #else

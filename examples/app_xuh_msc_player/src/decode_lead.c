@@ -20,7 +20,21 @@ static volatile unsigned published;
 static volatile unsigned published_underflows, published_held_ms;
 
 /* LCD task only: the leads drawn since the last report. */
-static struct { long long sum; int least, greatest; unsigned count, late, near, early; } summary;
+static struct { long long sum; int least, greatest; unsigned count, green, amber, red; } summary;
+static struct { int value; unsigned age, valid; } peak;
+
+static unsigned band_color(unsigned magnitude)
+{
+    return magnitude <= DECODE_LEAD_AMBER_MS ? GREEN : magnitude <= DECODE_LEAD_RED_MS ? AMBER : RED;
+}
+
+static unsigned bar_position(int delta)
+{
+    unsigned magnitude = delta < 0 ? (unsigned)-delta : (unsigned)delta;
+    unsigned capped = magnitude > DECODE_LEAD_RANGE_MS ? DECODE_LEAD_RANGE_MS : magnitude;
+    unsigned offset = capped * BAR_HALF / DECODE_LEAD_RANGE_MS;
+    return delta < 0 ? CENTRE - offset : CENTRE + offset;
+}
 
 static const unsigned char glyphs[][GLYPH_HEIGHT] = {
     {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e}, {0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e},
@@ -113,8 +127,15 @@ void decode_lead_draw(unsigned char *pixels, unsigned video_ms)
         if (!summary.count || delta > summary.greatest) summary.greatest = delta;
         summary.sum += delta;
         ++summary.count;
-        /* Beyond 100 ms either way is easily noticed as out of step. */
-        if (delta < -100) ++summary.late; else if (delta > 100) ++summary.early; else ++summary.near;
+        if (magnitude <= DECODE_LEAD_AMBER_MS) ++summary.green;
+        else if (magnitude <= DECODE_LEAD_RED_MS) ++summary.amber;
+        else ++summary.red;
+        unsigned held = peak.value < 0 ? (unsigned)-peak.value : (unsigned)peak.value;
+        if (!peak.valid || magnitude >= held || ++peak.age >= DECODE_LEAD_PEAK_PICTURES) {
+            peak.value = delta;
+            peak.age = 0;
+            peak.valid = 1;
+        }
     }
 
     fill(pixels, 0, 0, DECODE_LEAD_WIDTH, DECODE_LEAD_HEIGHT, BACKGROUND);
@@ -131,13 +152,20 @@ void decode_lead_draw(unsigned char *pixels, unsigned video_ms)
     fill(pixels, BAR_X - 1, BAR_Y - 1, BAR_HALF * 2 + 3, 4, BORDER);
     fill(pixels, BAR_X, BAR_Y, BAR_HALF * 2 + 1, 2, TRACK);
     fill(pixels, CENTRE, BAR_Y - 2, 1, 6, LABEL);
+    /* Marks under the bar where it turns amber and red, either side. */
+    for (unsigned side = 0; side < 2; ++side) {
+        int sign = side ? -1 : 1;
+        fill(pixels, bar_position(sign * (DECODE_LEAD_AMBER_MS + 1)), BAR_Y + 3, 1, 2, AMBER);
+        fill(pixels, bar_position(sign * (DECODE_LEAD_RED_MS + 1)), BAR_Y + 3, 1, 2, RED);
+    }
     if (valid) {
-        unsigned capped = magnitude > DECODE_LEAD_RANGE_MS ? DECODE_LEAD_RANGE_MS : magnitude;
-        unsigned offset = capped * BAR_HALF / DECODE_LEAD_RANGE_MS;
-        unsigned position = delta < 0 ? CENTRE - offset : CENTRE + offset;
-        unsigned color = magnitude <= 40 ? GREEN : magnitude <= 100 ? AMBER : RED;
-        fill(pixels, delta < 0 ? position : CENTRE, BAR_Y, offset + 1, 2, color);
+        unsigned position = bar_position(delta);
+        unsigned offset = delta < 0 ? CENTRE - position : position - CENTRE;
+        fill(pixels, delta < 0 ? position : CENTRE, BAR_Y, offset + 1, 2, band_color(magnitude));
         fill(pixels, CENTRE, BAR_Y - 2, 1, 6, LABEL);
+        /* The largest recent reading, in its band's colour, under the live tick. */
+        unsigned held = peak.value < 0 ? (unsigned)-peak.value : (unsigned)peak.value;
+        fill(pixels, bar_position(peak.value), BAR_Y - 2, 1, 6, band_color(held));
         fill(pixels, position, BAR_Y - 2, 1, 6, 0xffff);
     }
 #if APP_XUH_MSC_PLAYER_AUDIO_PACED
@@ -164,10 +192,12 @@ void decode_lead_report(void)
 {
     if (summary.count)
         printf("Audio decode lead: mean=%d min=%d max=%d ms over %u pictures; "
-               "late=%u within-100ms=%u early=%u\n",
+               "within %u ms=%u, within %u ms=%u, beyond=%u\n",
                (int)(summary.sum / (long long)summary.count), summary.least, summary.greatest,
-               summary.count, summary.late, summary.near, summary.early);
+               summary.count, DECODE_LEAD_AMBER_MS, summary.green,
+               DECODE_LEAD_RED_MS, summary.amber, summary.red);
     summary.sum = 0;
-    summary.count = summary.late = summary.near = summary.early = 0;
+    summary.count = summary.green = summary.amber = summary.red = 0;
+    peak.valid = 0;
 }
 #endif

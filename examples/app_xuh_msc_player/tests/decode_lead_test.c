@@ -101,7 +101,8 @@ static void check_drawing(void)
     assert(pixel(CENTRE + 22, BAR_Y) == WHITE); /* Positive is to the right. */
     decode_lead_draw(PIXELS, DECODE_LEAD_RANGE_MS + DECODE_LEAD_RANGE_MS / 2);
     assert(pixel(CENTRE - 22, BAR_Y) == WHITE);
-    unsigned magnitudes[] = {40, 41, 100, 101};
+    unsigned magnitudes[] = {DECODE_LEAD_AMBER_MS, DECODE_LEAD_AMBER_MS + 1,
+                             DECODE_LEAD_RED_MS, DECODE_LEAD_RED_MS + 1};
     unsigned colors[] = {(10u << 11) | (43u << 5) | 10u,
                          (26u << 11) | (39u << 5) | 7u,
                          (26u << 11) | (39u << 5) | 7u,
@@ -139,6 +140,21 @@ static void check_drawing(void)
 #else
     assert(DECODE_LEAD_HEIGHT == 22);
 #endif
+    /* Peak hold: a tick in its band's colour stays at the largest reading for
+     * DECODE_LEAD_PEAK_PICTURES pictures, then follows the live reading. */
+    decode_lead_report();
+    unsigned large = DECODE_LEAD_RED_MS + 10;
+    unsigned at = CENTRE + large * (BAR_RIGHT - CENTRE) / DECODE_LEAD_RANGE_MS;
+    decode_lead_publish(large, 1);
+    decode_lead_draw(PIXELS, 0);
+    assert(pixel(at, BAR_Y - 2) == WHITE);
+    decode_lead_publish(0, 1);
+    for (unsigned i = 1; i < DECODE_LEAD_PEAK_PICTURES; ++i) {
+        decode_lead_draw(PIXELS, 0);
+        assert(pixel(at, BAR_Y - 2) == (unsigned)((25u << 11) | (19u << 5) | 7u));
+    }
+    decode_lead_draw(PIXELS, 0);
+    assert(pixel(at, BAR_Y - 2) != (unsigned)((25u << 11) | (19u << 5) | 7u));
     guards();
 }
 #endif
