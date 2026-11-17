@@ -116,9 +116,9 @@ def main():
     if log.count(f"source rate={args.rate}/1 FPS") != (4 if args.rate == 25 else 3):
         raise SystemExit("FAIL: missing source frame-rate metadata")
     for stage in ("Receive YUV / wait", "YUV -> RGB565"):
-        if not re.search(rf"^\s*{re.escape(stage)}\s+0\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
-            raise SystemExit(f"FAIL: missing tile-0 timing for {stage}")
-    for stage, tile in (("Send YUV / backpressure", "1 -> 0"), ("Wait receiver ack", "1")):
+        if not re.search(rf"^\s*{re.escape(stage)}\s+1\s+[1-9][0-9]*\s*$", log, re.MULTILINE):
+            raise SystemExit(f"FAIL: missing receiver timing for {stage}")
+    for stage, tile in (("Send YUV / backpressure", "0 -> 1"), ("Wait receiver ack", "0")):
         if not re.search(rf"^\s*{re.escape(stage)}\s+{re.escape(tile)}\s+[1-9][0-9]*\s*$",
                          log, re.MULTILINE):
             raise SystemExit(f"FAIL: missing sender timing for {stage}")

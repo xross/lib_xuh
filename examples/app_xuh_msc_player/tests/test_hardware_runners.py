@@ -77,8 +77,8 @@ class HardwareRunnerTests(unittest.TestCase):
         output = "\n".join(
             ["PASS: pipeline play=" + str(n) for n in range(7)] +
             ["source rate=25/1 FPS"] * 4 +
-            ["  Receive YUV / wait 0 1", "  YUV -> RGB565 0 1",
-             "  Send YUV / backpressure 1 -> 0 1", "  Wait receiver ack 1 1"] +
+            ["  Receive YUV / wait 1 1", "  YUV -> RGB565 1 1",
+             "  Send YUV / backpressure 0 -> 1 1", "  Wait receiver ack 0 1"] +
             ["RGB565 frame=0 hash=aaaaaaaa"] * 3 + ["RGB565 frame=0 hash=bbbbbbbb"] +
             ["PASS: MPEG pipeline repeat, EOF drain, open/read/empty errors and recovery"]
         )

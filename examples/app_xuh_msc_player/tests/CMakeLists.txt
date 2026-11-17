@@ -56,3 +56,6 @@ set_tests_properties(profile_summary PROPERTIES TIMEOUT 30)
 add_test(NAME hardware_runner_delegation COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/test_hardware_runners.py)
 set_tests_properties(hardware_runner_delegation PROPERTIES TIMEOUT 30)
+add_test(NAME player_report_parser COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_LIST_DIR}/test_player_reports.py)
+set_tests_properties(player_report_parser PROPERTIES TIMEOUT 30)
