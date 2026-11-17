@@ -149,6 +149,75 @@ static unsigned strict_failed(const unsigned stats[AUDIO_STATS_WORDS])
     return APP_XUH_MSC_PLAYER_PACING_STRICT && stats[AUDIO_UNDERFLOWS];
 }
 
+/* The channel protocol and decoder lifecycle shared by both forms of the task. */
+
+/* Start of a play: take START, open the decoder, clear the displays and reply.
+ * Returns whether this play decodes. */
+static unsigned begin_play(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
+{
+    unsigned header[2];
+    pipeline_receive(channel, header, 2);
+    if (header[0] != AUDIO_START) __builtin_trap();
+    media_start_ms = 0;
+#if APP_XUH_MSC_PLAYER_AUDIO_DAC
+    audio_dac_reset();
+#endif
+    unsigned decode = header[1], result = decode &&
+        mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
+#if DECODE_LEAD_ENABLED
+    decode_lead_publish(0, 0);
+    decode_lead_underflows_publish(0, 0);
+#endif
+#if AUDIO_METER_ENABLED
+    audio_meter_publish(0, 0);
+#endif
+    pipeline_send(channel, &result, 1);
+    if (result) ++stats[AUDIO_ERRORS];
+    return decode;
+}
+
+/* One message from the sender, once the channel is ready. Returns its
+ * operation: AUDIO_DATA with *bytes of payload, AUDIO_STOP, or AUDIO_OFFSET,
+ * which is handled here. */
+static unsigned receive_message(chanend channel, unsigned payload[AUDIO_CHUNK_BYTES / 4],
+                                unsigned *bytes)
+{
+    unsigned operation = chanend_in_word(channel);
+    unsigned value = chanend_in_word(channel);
+    if (operation == AUDIO_DATA) {
+        if (!value || value > AUDIO_CHUNK_BYTES) __builtin_trap();
+        for (unsigned i = 0; i < (value + 3) / 4; ++i) payload[i] = chanend_in_word(channel);
+    } else if (operation == AUDIO_OFFSET) {
+        media_start_ms = (int)value;
+    } else if (operation != AUDIO_STOP) {
+        __builtin_trap();
+    }
+    chanend_check_control_token(channel, XS1_CT_END);
+    asm volatile("" ::: "memory");
+    *bytes = value;
+    return operation;
+}
+
+/* End of a play: close the decoder and return the statistics. A strict abort
+ * may leave the input incomplete; that is not reported as a decoder error. */
+static void end_play(chanend channel, unsigned decode, unsigned stats[AUDIO_STATS_WORDS])
+{
+    if (decode) {
+        if (!strict_failed(stats) &&
+            (mpeg_audio_finish() != MPEG_END || !stats[AUDIO_BLOCKS])) ++stats[AUDIO_ERRORS];
+        stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
+        mpeg_audio_close();
+    }
+#if DECODE_LEAD_ENABLED
+    /* Otherwise the last audio position stays available while video drains. */
+    if (stats[AUDIO_ERRORS]) decode_lead_publish(0, 0);
+#endif
+#if AUDIO_METER_ENABLED
+    audio_meter_publish(0, 0);
+#endif
+    pipeline_send(channel, stats, AUDIO_STATS_WORDS);
+}
+
 #if APP_XUH_MSC_PLAYER_AUDIO_DAC
 #if MPEG_AUDIO_FORMAT != MPEG_AUDIO_FORMAT_S32 || !APP_XUH_MSC_PLAYER_AUDIO_PACED
 #error Physical I2S output requires paced S32 decoding
@@ -184,26 +253,11 @@ void mp2_audio_task(chanend channel)
     hwtimer_t timer = hwtimer_alloc();
     if (!timer) __builtin_trap();
     for (;;) {
-        unsigned header[2], stats[AUDIO_STATS_WORDS] = {0};
+        unsigned stats[AUDIO_STATS_WORDS] = {0};
         unsigned status[DAC_STATUS_WORDS] = {0};
         const mpeg_audio_sample_t *block = NULL;
         unsigned remaining = 0, need_input = 1, stopping = 0, acknowledge = 0, silenced = 0;
-        pipeline_receive(channel, header, 2);
-        if (header[0] != AUDIO_START) __builtin_trap();
-        media_start_ms = 0;
-        unsigned decode = header[1];
-        audio_dac_reset();
-        unsigned result = decode &&
-            mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
-#if DECODE_LEAD_ENABLED
-        decode_lead_publish(0, 0);
-        decode_lead_underflows_publish(0, 0);
-#endif
-#if AUDIO_METER_ENABLED
-        audio_meter_publish(0, 0);
-#endif
-        pipeline_send(channel, &result, 1);
-        if (result) ++stats[AUDIO_ERRORS];
+        unsigned decode = begin_play(channel, stats);
         for (;;) {
             unsigned failed = stats[AUDIO_ERRORS] || strict_failed(stats);
             unsigned active = decode && !failed;
@@ -259,23 +313,9 @@ void mp2_audio_task(chanend channel)
                                CASE_GUARD_THEN(channel, accept && !stopping, on_message))
             {
             on_message: {
-                unsigned operation = chanend_in_word(channel);
-                unsigned bytes = chanend_in_word(channel);
-                if (operation == AUDIO_STOP) {
-                    chanend_check_control_token(channel, XS1_CT_END);
-                    stopping = 1;
-                    break;
-                }
-                if (operation == AUDIO_OFFSET) {
-                    chanend_check_control_token(channel, XS1_CT_END);
-                    media_start_ms = (int)bytes;
-                    break;
-                }
-                if (operation != AUDIO_DATA || !bytes || bytes > AUDIO_CHUNK_BYTES) __builtin_trap();
-                for (unsigned i = 0; i < (bytes + 3) / 4; ++i)
-                    payload[i] = chanend_in_word(channel);
-                chanend_check_control_token(channel, XS1_CT_END);
-                asm volatile("" ::: "memory");
+                unsigned bytes, operation = receive_message(channel, payload, &bytes);
+                if (operation == AUDIO_STOP) stopping = 1;
+                if (operation != AUDIO_DATA) break;
                 stats[AUDIO_BYTES] += bytes;
                 if (active) {
                     if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) ++stats[AUDIO_ERRORS];
@@ -295,19 +335,7 @@ void mp2_audio_task(chanend channel)
             audio_dac_finish();
             dac_progress(status, stats);
         }
-        if (decode) {
-            if (!strict_failed(stats) &&
-                (mpeg_audio_finish() != MPEG_END || !stats[AUDIO_BLOCKS])) ++stats[AUDIO_ERRORS];
-            stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
-            mpeg_audio_close();
-        }
-#if DECODE_LEAD_ENABLED
-        if (stats[AUDIO_ERRORS] || strict_failed(stats)) decode_lead_publish(0, 0);
-#endif
-#if AUDIO_METER_ENABLED
-        audio_meter_publish(0, 0);
-#endif
-        pipeline_send(channel, stats, AUDIO_STATS_WORDS);
+        end_play(channel, decode, stats);
     }
 }
 #else
@@ -326,28 +354,15 @@ void mp2_audio_task(chanend channel)
     unsigned payload[AUDIO_CHUNK_BYTES / 4];
     hwtimer_t timer = hwtimer_alloc();
     for (;;) {
-        unsigned header[2], stats[AUDIO_STATS_WORDS] = {0};
+        unsigned stats[AUDIO_STATS_WORDS] = {0};
         decode_lead_clock_t media_clock = {0};
         audio_playback_t playback = {0};
         unsigned playing = 0, due = 0, pending = 0, pending_due = 0;
         unsigned epoch = 0, need_input = 1, stopping = 0, acknowledge = 0;
         mpeg_audio_sample_t tail[2] = {0}, pending_tail[2] = {0};
         held_output[0] = held_output[1] = 0;
-        pipeline_receive(channel, header, 2);
-        if (header[0] != AUDIO_START) __builtin_trap();
-        media_start_ms = 0;
-        unsigned decode = header[1], result = decode &&
-            mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
+        unsigned decode = begin_play(channel, stats);
         unsigned paced = APP_XUH_MSC_PLAYER_AUDIO_PACED && decode;
-#if DECODE_LEAD_ENABLED
-        decode_lead_publish(0, 0);
-        decode_lead_underflows_publish(0, 0);
-#endif
-        pipeline_send(channel, &result, 1);
-        if (result) ++stats[AUDIO_ERRORS];
-#if AUDIO_METER_ENABLED
-        audio_meter_publish(0, 0);
-#endif
         for (;;) {
             unsigned active = paced && !stats[AUDIO_ERRORS] && !strict_failed(stats);
             if (active) {
@@ -437,23 +452,9 @@ void mp2_audio_task(chanend channel)
                                CASE_GUARD_THEN(channel, accept && !stopping, on_message))
             {
             on_message: {
-                unsigned operation = chanend_in_word(channel);
-                unsigned bytes = chanend_in_word(channel);
-                if (operation == AUDIO_STOP) {
-                    chanend_check_control_token(channel, XS1_CT_END);
-                    stopping = 1;
-                    break;
-                }
-                if (operation == AUDIO_OFFSET) {
-                    chanend_check_control_token(channel, XS1_CT_END);
-                    media_start_ms = (int)bytes;
-                    break;
-                }
-                if (operation != AUDIO_DATA || !bytes || bytes > AUDIO_CHUNK_BYTES) __builtin_trap();
-                for (unsigned i = 0; i < (bytes + 3) / 4; ++i)
-                    payload[i] = chanend_in_word(channel);
-                chanend_check_control_token(channel, XS1_CT_END);
-                asm volatile("" ::: "memory");
+                unsigned bytes, operation = receive_message(channel, payload, &bytes);
+                if (operation == AUDIO_STOP) stopping = 1;
+                if (operation != AUDIO_DATA) break;
                 stats[AUDIO_BYTES] += bytes;
                 if (decode && !stats[AUDIO_ERRORS] && !strict_failed(stats)) {
                     if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) {
@@ -482,22 +483,7 @@ void mp2_audio_task(chanend channel)
             }
         }
         hwtimer_clear_trigger_time(timer);
-        if (decode) {
-            /* Strict abort may intentionally leave an incomplete input stream;
-             * do not misreport its truncation as a second decoder error. */
-            if (!strict_failed(stats) &&
-                (mpeg_audio_finish() != MPEG_END || !stats[AUDIO_BLOCKS])) ++stats[AUDIO_ERRORS];
-            stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
-            mpeg_audio_close();
-        }
-#if DECODE_LEAD_ENABLED
-        /* Keep the final audio position available while buffered video drains. */
-        if (stats[AUDIO_ERRORS]) decode_lead_publish(0, 0);
-#endif
-#if AUDIO_METER_ENABLED
-        audio_meter_publish(0, 0);
-#endif
-        pipeline_send(channel, stats, AUDIO_STATS_WORDS);
+        end_play(channel, decode, stats);
     }
 }
 #endif
