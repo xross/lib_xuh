@@ -71,7 +71,10 @@ Known issues
   (`#15 <https://github.com/xross/lib_xuh/issues/15>`__)
   and requires 512-byte blocks
   (`#16 <https://github.com/xross/lib_xuh/issues/16>`__).
-* The player example has no pacing, audio output or A/V synchronisation
+* The player has no physical audio output. Experimental audio-clock pacing uses
+  a 400-KiB video arena by default. Insufficient read-ahead can cause audio
+  underflows, reported on screen and at end of play; optional strict test builds
+  fail on underflow instead of continuing
   (`#17 <https://github.com/xross/lib_xuh/issues/17>`__).
   See the library guide for its media, memory and validation limits.
 * USB hubs are not supported

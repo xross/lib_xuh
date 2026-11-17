@@ -440,31 +440,41 @@ the screen on a 48-dB logarithmic scale, 11 pixels for each halving of the peak
 level: green when quiet, through amber, to red at full scale. Each bar rises
 at once, falls two pixels a frame and carries a white peak-hold tick. The audio
 task publishes the peak of each decoded MP2 block to the display task, on the
-same tile, without a channel. The audio is still neither played nor synchronised
-with the video: the meter shows the level of the audio most recently decoded.
+same tile, without a channel. There is no physical audio output: the meter shows
+the level of the audio most recently decoded by the timed audio task.
 With S32 PCM the peak scan and logarithmic meter scale use integer arithmetic;
 there is no per-sample conversion to float.
 
-Between the two meters, the ``DEC`` gauge occupies (110, 4) through (209, 25).
-It estimates **audio decode lead**, not lip-sync: decoded audio duration minus
-the end-of-frame media position of the picture just transferred to the LCD.
-Positive milliseconds mean audio decoding is ahead (right of centre); negative
+Between the two meters, the ``DEC`` gauge occupies (110, 4) through (209, 29),
+ending on the row above a 180-row picture.
+It estimates **audio lead**, not lip-sync: the audio position minus the
+end-of-frame media position of the picture just transferred to the LCD. In a
+paced build the audio position is the audio played on the timed output clock;
+in an unpaced build it is the audio decoded.
+Positive milliseconds mean audio is ahead (right of centre); negative
 mean it is behind (left). The bar spans -1000 to +1000 ms and clamps at the ends;
 the signed numeric reading continues to 9999 ms, with ``>`` marking larger
 magnitudes. Colours indicate magnitude: green through 40 ms, amber through
 100 ms, then red. These are diagnostic bands, not lip-sync tolerances.
+Its third line shows ``U:003 H:00120MS``: cumulative confirmed underflow episodes
+and time holding the last stereo sample pair. ``>`` replaces ``:`` when a value
+exceeds the display's three/five digits; terminal reports retain full values.
+Unpaced builds retain the original 100 x 22 rectangle, without the footer or its
+extra SPI transfer, for maximum-throughput comparisons.
 
-Audio duration comes from decoded samples and their sample rate. Video duration
+Audio duration comes from played (paced) or decoded (unpaced) samples and their
+sample rate. Video duration
 uses the exact sequence-header frame-rate rational, including 24000/1001 and
 30000/1001; sub-millisecond remainders are retained rather than rounded each
 frame or block. Both positions refer to the end of their block/frame and assume
-aligned stream starts. PES timestamps and initial stream offsets are not used.
+aligned stream starts for this gauge. The separate pacing clock uses PES start
+timestamps; the gauge itself does not correct for those offsets.
 This is neither audio playback timing nor the panel's physical scanout timing.
 The unsmoothed value intentionally exposes demux bursts and buffering.
 
 The LCD task samples audio progress after each picture's SPI transfer and draws
-the gauge from a separate 4400-byte buffer, leaving video-slot integrity checks
-unchanged. It refreshes the fixed rectangle even when outside a smaller picture.
+the gauge from a separate 5200-byte buffer (4400 bytes in unpaced builds),
+leaving video-slot integrity checks unchanged. It refreshes the fixed rectangle even when outside a smaller picture.
 Before the first decoded block, or after an audio error, it shows dashes rather
 than a misleading zero. The last audio position remains available while video
 drains; each new play resets it. Disable with
@@ -482,8 +492,61 @@ independent of the target rate.
 
 The program-stream player supports MPEG-1 pack/PES headers, video stream 0xe0
 and MP2 audio stream 0xc0. It skips other packet types and rejects MPEG-2 pack
-headers. Timestamps are not used. MP2 PCM is decoded on tile 0 and discarded;
-there is no physical audio output or A/V synchronisation.
+headers. MP2 PCM is decoded on tile 0 and discarded; there is no physical audio
+output. By default the audio task consumes blocks at their sample rate as a
+stand-in for playback. Video is paced against this clock, using the initial PES
+timestamps to relate the stream starts. This is an experimental timing path,
+not a measurement of audible lip-sync or physical LCD scanout. One audio block
+is decoded ahead of its deadline using the existing decoder PCM storage; no
+additional full PCM buffer is allocated. Once started, the output clock never
+pauses for lack of input. The stand-in retains the last emitted left/right pair
+through a gap; late blocks are decoded to maintain MP2 synthesis state, but only
+samples whose presentation time has not passed are modelled as output. This is
+not physical I2S or click suppression; a long hold would be DC on a real output.
+
+Underflows count episodes, not missing blocks. Consecutive completely late
+blocks belong to the same episode; a usable suffix ends it. Counts and held
+duration are confirmed as subsequent audio is decoded, rather than counting a
+provisional tail beyond the last frame. This excludes startup and normal EOF
+without parsing MP2 headers twice. End of input drains remaining audio at its
+sample rate. ``MP2 underflows`` reports count, held samples/channel and ms,
+dropped samples/channel, and the strict-mode setting at end of play.
+
+While waiting for a picture deadline, the decoder accepts video without blocking
+on the next storage read. The player's ``src/video_config.h`` sets
+``APP_XUH_MSC_PLAYER_MPEG_ARENA_BYTES`` to 409600 bytes (400 KiB) by default.
+The arena must be at least 393216 and a multiple of eight. After reading the
+initial sequence header, the decoder reserves three padded pictures, decoder
+state and guards, then uses the remainder for compressed input. There is no
+separate input-size setting. All callers use this layout; video-only and unpaced builds retain a 384-KiB arena, remain
+unpaced and get input space according to their picture dimensions.
+The end-of-play ``MPEG input`` line reports actual capacity and peak occupancy.
+When full during a paced wait, the decoder waits for the next picture deadline
+instead of releasing it early or predicting audio starvation. Normal playback
+continues through audio underflows on the same timeline, with gaps counted and
+late PCM discarded. Configure ``-DAPP_XUH_MSC_PLAYER_PACING_STRICT=ON`` for tests
+that must fail on the first confirmed underflow. Strict failure is latched in
+the audio task and returned on the next audio acknowledgement; both channel
+peers still drain/close their protocol. Decoder, format, genuinely oversized
+compressed-picture and storage errors remain fatal in either mode.
+Discontinuous timestamps and midstream format changes are unsupported.
+
+Paced playback decodes each picture and then holds it, releasing it ahead of its
+due time by the display latency: the time from handing a decoded picture over to
+the end of its write to the display. ``APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS`` in
+``src/video_config.h`` sets it. It depends on the picture size, display and SPI
+rate, not on the content, since decoding is finished before the hold. The default
+of 25 ms is for 320 x 180 pictures on the ILI9341 at 50-MHz SPI. The panel's own
+refresh delay is not included.
+
+Edit ``src/video_config.h`` to change the arena budget; it is not a CMake cache
+option.
+The 400-KiB arena spends another 16 KiB of tile-1 RAM compared with the library
+default and provides about 129 KiB of compressed input for 320 x 180 pictures. The
+larger arena applies only to paced audio/video builds, not library defaults or
+video-only/unpaced storage. Check the link report and stack caveats before
+increasing it; the manual decoder stack reservation is not a proved bound.
+
 The player selects S32 PCM with the XS3 vector synthesis window by default;
 ``lib_mpeg`` itself still defaults to float. The player's ``mpeg_conf.h`` sets
 ``MPEG_AUDIO_FORMAT``; change it to ``MPEG_AUDIO_FORMAT_FLOAT`` for the float
@@ -541,7 +604,8 @@ buffer. Decode and RGB transmission do not overlap; file loading and LCD output
 can overlap decoding. Tile 0 converts received pixels into two 153600-byte
 RGB565 framebuffers, allowing receive/conversion to overlap rendering.
 
-For MPEG, tile 1 has two 4096-byte loader slots and a 384-KiB decoder arena.
+For MPEG, tile 1 has two 4096-byte loader slots and a 384-KiB decoder arena
+(400 KiB for paced audio/video by default).
 The decoder/transmitter sends each picture as two-row YUV420 strips using the
 library plane strides. Tile 0 converts a 960-byte strip directly into one of its
 two RGB565 framebuffers; no full RGB888 or extra YUV framebuffer is allocated.
@@ -706,9 +770,12 @@ commands above to make your own. The demux checks belong to this application
 and do not build or depend on the MPEG decoder.
 
 The finite ``tests/app_audio_pipeline`` fixture runs the actual MP2 channel task
-on tile 0 with a tile-1 producer. Eight cases cover partial-word and multi-chunk
+on tile 0 with a tile-1 producer. Ten cases cover partial-word and multi-chunk
 sends, deterministic replay, decode bypass, empty/truncated/malformed input,
-draining after a latched error and restart. The runner generates three MP2
+draining after a latched error and restart, deliberate starvation with a
+continuing clock, partial-frame late-PCM discard, and EOF without false underflow.
+Configure a second build with ``-DTEST_AUDIO_STRICT=ON`` to verify strict failure
+and clean protocol restart after the same injected gap. The runner generates three MP2
 frames with FFmpeg and requires normal termination and the checked success
 marker::
 
@@ -735,7 +802,8 @@ explicit target option above also updates build directories cached with the old
 stock XL0 target; use a fresh build directory or reconfigure with that option.
 Omit ``--adapter-id`` to simulate with cycle and host-time bounds. This fixture
 uses JTAG host-file I/O, not USB or a physical audio interface, and is not a
-throughput benchmark.
+throughput benchmark. Paced waits make simulation slow; prefer the finite
+hardware fixture when the simulator reaches its host-time bound.
 
 ``examples/app_xuh_msc_player/tests/sim`` holds simulator tests run by pytest
 with ``test_support``. ``test_audio_meter.py`` checks the integer level meter
