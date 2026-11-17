@@ -49,6 +49,57 @@ static int play(unsigned capacity)
     }
     return result;
 }
+/* Presentation times. Video starts at 0.54 s (48600 ticks of 90 kHz). Audio
+ * packets are at 0.54 s and then, with a decoding time as well, 1.5 s (135000).
+ * The audio position is the newest audio time less the first video time. */
+static const unsigned char timed[] = {
+    0,0,1,0xba, 0x21,0,1,0,1,0,0,1,
+    0,0,1,0xc0, 0,3, 0x0f, 21,22,                              /* audio, no time */
+    0,0,1,0xe0, 0,7, 0x21,0x00,0x03,0x7b,0xb1, 1,2,
+    0,0,1,0xc0, 0,7, 0x21,0x00,0x03,0x7b,0xb1, 11,12,
+    0,0,1,0xe0, 0,7, 0x21,0x00,0x05,0xbf,0x21, 3,4,            /* later video */
+    0,0,1,0xc0, 0,12, 0x31,0x00,0x09,0x1e,0xb1, 0x11,0x00,0x09,0x1e,0xb1, 13,14,
+    0,0,1,0xe0, 0,3, 0x0f, 5,6,
+    0,0,1,0xb9
+};
+static unsigned timed_position, timed_fragment;
+static int read_timed(void *context, unsigned char *data, unsigned capacity, unsigned *bytes)
+{
+    (void)context;
+    *bytes = sizeof(timed) - timed_position;
+    if (*bytes > timed_fragment) *bytes = timed_fragment;
+    if (*bytes > capacity) *bytes = capacity;
+    memcpy(data, timed + timed_position, *bytes);
+    timed_position += *bytes;
+    return 0;
+}
+static void timestamps(void)
+{
+    for (timed_fragment = 1; timed_fragment <= sizeof(timed); ++timed_fragment) {
+        mpeg_ps_reader_t reader;
+        unsigned ms = 99, bytes, total = 0, seen_zero = 0;
+        int result;
+        timed_position = audio_size = 0;
+        mpeg_ps_init(&reader, read_timed, NULL);
+        assert(!mpeg_ps_audio_position(&reader, &ms) && ms == 99);
+        /* One video byte at a time, so the position is seen as it advances. */
+        while ((result = mpeg_ps_read_video(&reader, video + total, 1, &bytes, audio_data, NULL)) > 0) {
+            total += bytes;
+            if (mpeg_ps_audio_position(&reader, &ms)) {
+                assert(ms == 0 || ms == 960);
+                seen_zero |= ms == 0;
+            } else {
+                assert(ms == 99 || ms == 0);
+            }
+        }
+        assert(result == 0 && total == 6 && audio_size == 6 && seen_zero);
+        assert(mpeg_ps_audio_position(&reader, &ms) && ms == 960);
+        int start = 99;
+        assert(mpeg_ps_audio_start(&reader, &start) && start == 0);
+        for (unsigned i = 0; i < total; ++i) assert(video[i] == i + 1);
+    }
+}
+
 int main(void)
 {
     for (fragment = 1; fragment <= sizeof(fixture); ++fragment) {
@@ -70,6 +121,8 @@ int main(void)
     assert(play(4) == -1);
     fail_read = 0; fail_audio = 1;
     assert(play(4) == -1);
-    puts("PASS: PS cache/PES boundaries, replay, truncation, malformed headers and I/O/sink errors");
+    fail_audio = 0;
+    timestamps();
+    puts("PASS: PS cache/PES boundaries, timestamps, replay, truncation, malformed headers and I/O/sink errors");
     return 0;
 }

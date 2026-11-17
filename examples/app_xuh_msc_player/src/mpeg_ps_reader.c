@@ -76,7 +76,27 @@ static int next_packet(mpeg_ps_reader_t *r)
         unsigned header = marker >= 0 && (marker >> 4) == 2 ? 4 :
                           marker >= 0 && (marker >> 4) == 3 ? 9 : 0;
         if (marker < 0 || (!header && marker != 0x0f) || header > r->remaining) break;
-        if (skip(r, header)) break;
+        if (header) {
+            /* A 33-bit presentation time in 90 kHz units: three bits in the
+             * marker, then 15 and 15, each followed by a marker bit. Any
+             * decoding time that follows is not needed. */
+            int b[4];
+            for (unsigned i = 0; i < 4; ++i) b[i] = byte(r);
+            if (b[3] < 0) break;
+            unsigned long long pts = ((unsigned long long)((marker >> 1) & 7) << 30) |
+                ((unsigned)b[0] << 22) | ((unsigned)(b[1] >> 1) << 15) |
+                ((unsigned)b[2] << 7) | (unsigned)(b[3] >> 1);
+            unsigned ms = (unsigned)(pts / 90);
+            if (code == 0xc0) {
+                if (!r->have_audio) r->audio_start_ms = ms;
+                r->audio_ms = ms;
+                r->have_audio = 1;
+            } else if (!r->have_video_start) {
+                r->video_start_ms = ms;
+                r->have_video_start = 1;
+            }
+            if (skip(r, header - 4)) break;
+        }
         r->remaining -= header;
         r->stream = (unsigned)code;
         if (!r->remaining) continue;
@@ -123,5 +143,19 @@ int mpeg_ps_read_video(mpeg_ps_reader_t *r, unsigned char *output,
         r->position += count;
         r->remaining -= count;
     }
+    return 1;
+}
+
+int mpeg_ps_audio_position(const mpeg_ps_reader_t *r, unsigned *ms)
+{
+    if (!r->have_audio || !r->have_video_start) return 0;
+    *ms = r->audio_ms > r->video_start_ms ? r->audio_ms - r->video_start_ms : 0;
+    return 1;
+}
+
+int mpeg_ps_audio_start(const mpeg_ps_reader_t *r, int *ms)
+{
+    if (!r->have_audio || !r->have_video_start) return 0;
+    *ms = (int)r->audio_start_ms - (int)r->video_start_ms;
     return 1;
 }
