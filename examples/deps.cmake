@@ -5,4 +5,4 @@ set(APP_DEPENDENT_MODULES   "lib_logging(3.3.2)"
 )
 set(XUH_JPEG_DEPENDENCY "git@github.com:xmos/lib_jpeg(b515df327d287e3444e8d3cc01642d65d90691ae)")
 set(XUH_SPI_DEPENDENCY "lib_spi(4.0.0)")
-set(XUH_MPEG_DEPENDENCY "git@github.com:xross/lib_mpeg(3b3d3318846cad29a973e6f0a39e95392e10ef4b)")
+set(XUH_MPEG_DEPENDENCY "git@github.com:xross/lib_mpeg(196d6930a10724b150d65d6e983f424ce01658a9)")
