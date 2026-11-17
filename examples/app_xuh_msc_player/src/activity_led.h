@@ -9,12 +9,18 @@ enum { ACTIVITY_LED_BUSY = 1, ACTIVITY_LED_ERROR = 2, ACTIVITY_LED_FRAME = 4 };
 #define ACTIVITY_LED_FRAME_MASK 0xff000000u
 
 #if APP_XUH_MSC_PLAYER_ACTIVITY_LED
-/* The task and both callers must share a tile. USBHost owns usb(); the decoder
- * owns decode(). Errors latch until reset. FRAME marks a successfully decoded frame, not an input request.
- * These best-effort updates never wait for the LED task. */
+#include <xccompat.h>
+/* USBHost owns usb(); the decoder owns decode(). Errors latch until reset.
+ * FRAME marks a successfully decoded frame, not an input request. Each update
+ * is sent to the LED task, which may run on another tile, and waits only for
+ * that task to take one word. */
 void activity_led_usb(unsigned flags);
 void activity_led_decode(unsigned flags);
-void activity_led_task(void);
+/* Give each writer its channel to the LED task, from the writer's own thread
+ * before its first update. */
+void activity_led_usb_init(chanend c);
+void activity_led_decode_init(chanend c);
+void activity_led_task(chanend c_usb, chanend c_decode);
 #else
 static inline void activity_led_usb(unsigned flags) { (void)flags; }
 static inline void activity_led_decode(unsigned flags) { (void)flags; }

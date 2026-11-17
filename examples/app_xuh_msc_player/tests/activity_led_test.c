@@ -111,6 +111,28 @@ static void test_frame_accents(void)
     assert(effect.failed && duty[0] == 0 && duty[1] == 255);
 }
 
+static void test_coalesced_updates(void)
+{
+    /* The LED task steps with the latest words it has taken, so several
+     * updates may arrive, or none, between two steps. */
+    activity_led_effect_t effect = {0};
+    unsigned decode = ACTIVITY_LED_BUSY, words[2] = {0, ACTIVITY_LED_BUSY}, duty[2];
+    for (unsigned i = 0; i < 60; ++i)
+        activity_led_effect_step(&effect, words, duty);
+    assert(duty[1] == 63 && !effect.frame_cooldown);
+    /* Two frames, each replaced before a step: one accent. */
+    decode = activity_led_next_word(decode, ACTIVITY_LED_FRAME);
+    decode = activity_led_next_word(decode, ACTIVITY_LED_BUSY);
+    decode = activity_led_next_word(decode, ACTIVITY_LED_FRAME);
+    words[1] = activity_led_next_word(decode, ACTIVITY_LED_BUSY);
+    activity_led_effect_step(&effect, words, duty);
+    assert(duty[0] == 0 && duty[1] == 255);
+    /* No further update: no second accent. */
+    for (unsigned i = 0; i < 100; ++i)
+        activity_led_effect_step(&effect, words, duty);
+    assert(!effect.frame_pulse && duty[1] == 63);
+}
+
 static void test_pwm(void)
 {
     /* Exhaust all 65536 colour mixes: sorted deadlines, bounded masks and
@@ -139,10 +161,11 @@ int main(void)
     test_mailbox();
     test_effects();
     test_frame_accents();
+    test_coalesced_updates();
     test_pwm();
     /* Disabled hooks must also be usable without target headers/runtime. */
     activity_led_usb(ACTIVITY_LED_BUSY);
     activity_led_decode(ACTIVITY_LED_ERROR);
-    puts("PASS: LED breathing, activity/decay, frame accents, latched error, generation wrap and all PWM mixes");
+    puts("PASS: LED breathing, activity/decay, frame accents, coalesced updates, latched error, generation wrap and all PWM mixes");
     return 0;
 }

@@ -9,13 +9,13 @@ endif()
 
 set(APP_INCLUDES src)
 
-# The board's LEDs are on tile 1. The LED task reads tile-local words written by
-# the USB host and the decoder, which run on tile 0, so the player cannot drive it.
-option(APP_XUH_MSC_PLAYER_ACTIVITY_LED "PWM the tile-1 port-32A green/red activity LED" OFF)
-option(APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW "Invert both activity LED outputs" OFF)
-if(APP_XUH_MSC_PLAYER_ACTIVITY_LED)
-    message(FATAL_ERROR "The activity LED is on tile 1; the USB host and decoder that feed it run on tile 0")
+if(APP_HW_TARGET MATCHES "XK-EVK-XU316-AIV")
+    set(APP_XUH_MSC_PLAYER_ACTIVITY_LED_DEFAULT ON)
+else()
+    set(APP_XUH_MSC_PLAYER_ACTIVITY_LED_DEFAULT OFF)
 endif()
+option(APP_XUH_MSC_PLAYER_ACTIVITY_LED "PWM the tile-1 port-32A green/red activity LED" ${APP_XUH_MSC_PLAYER_ACTIVITY_LED_DEFAULT})
+option(APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW "Invert both activity LED outputs" OFF)
 
 set(APP_COMPILER_FLAGS -O3 -g -DDEBUG_PRINT_ENABLE=1 -report -mno-dual-issue -fxscope -mcmodel=large)
 option(APP_XUH_MSC_PLAYER_FPS_OVERLAY "Show the live FPS meter in the top-left of the LCD" ON)

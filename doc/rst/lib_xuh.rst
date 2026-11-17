@@ -314,8 +314,8 @@ benchmark configuration:
      - ``ON``
      - Draw a smoothed measured-FPS gauge with the MPEG source-rate target
    * - ``APP_XUH_MSC_PLAYER_ACTIVITY_LED``
-     - ``OFF``
-     - Activity/status LED task; not available in the player (see below)
+     - ``ON`` on AIV
+     - Enable the activity/status LED (see below)
    * - ``APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW``
      - ``OFF``
      - Invert LED outputs for active-low wiring
@@ -595,7 +595,7 @@ Pipeline and ownership
 
 Tile 0 owns the USB manager, FatFs/read-ahead loader and video decoder. Tile 1
 owns the pixel receiver/converter, LCD renderer and SPI master. The optional MP2
-decoder also runs on tile 1.
+decoder also runs on tile 1, as does the optional activity LED task.
 
 ``src/video_loader.c`` provides the shared, storage-independent loader. A source
 returns either one complete JPEG frame or an MPEG chunk of at most 4096 bytes.
@@ -626,9 +626,9 @@ be reused only after rendering completes. Multi-sector READ(10) commands serve
 FatFs reads, with at most 64 512-byte sectors per command. Display work and
 filesystem reads do not execute inside the USB manager.
 
-The large memory model is required. A default MPEG-1 build uses 478412 bytes on
-tile 0 and 333700 bytes on tile 1, including code, data and reserved stacks;
-45876 bytes remain on tile 0. These are build-dependent figures, not an SRAM
+The large memory model is required. A default MPEG-1 build uses 478708 bytes on
+tile 0 and 334844 bytes on tile 1, including code, data and reserved stacks;
+45580 bytes remain on tile 0. These are build-dependent figures, not an SRAM
 budget for arbitrary additions. The decoder's 16-KiB stack reservation is
 provisional because callback branches prevent complete automatic analysis.
 
@@ -636,19 +636,24 @@ Activity/status LED
 -------------------
 
 On the example hardware, tile-1 port 32A bits 0 and 1 drive active-high green and red LEDs.
-The LED task reads words published, without a channel, by the USB host and the
-decoder, so it must share their tile. In the player those run on tile 0, so the
-player cannot drive the LED and rejects ``APP_XUH_MSC_PLAYER_ACTIVITY_LED=ON``.
-The task and its tests remain; the effect is as follows.
 Idle is dim green breathing; storage operations pulse green, decoding adds red,
 and completed frames trigger rate-limited red accents. Reported errors latch a
 double-red-flash pattern until reset. A blocked USB operation remains busy:
 the LED is not a transfer timeout or watchdog.
 
-The effect uses one thread and hardware timer. Producers publish tile-local
-mailbox words without channel handshakes in the playback path. Do not share port
-32A ownership with another task. Disable the LED for a comparison only if it is
-disabled in every compared build.
+The USB host and the decoder, on tile 0, each keep a word that counts
+operations and completed frames and holds the busy and error flags. Each sends
+every new value to the LED task on tile 1 over a channel of its own; the send
+waits only for the LED task to take one word. The LED task takes words while it
+waits on its hardware timer for the next PWM edge, and steps the effect every
+5 ms with the latest. Because the words are cumulative, a frame is neither lost
+nor counted twice when several updates, or none, arrive between steps.
+
+The LED uses one thread and hardware timer, on tile 1, and no thread on tile 0.
+Do not share port 32A ownership with another task. Disable the LED for a
+comparison only if it is disabled in every compared build.
+``tests/app_activity_led`` runs the writers and the LED task on their tiles,
+under ``xsim`` or on hardware, and checks the port 32A duty for each effect.
 
 Metrics and performance
 -----------------------

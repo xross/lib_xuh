@@ -77,44 +77,41 @@ unsigned activity_led_pwm_edges(const unsigned duty[2], activity_led_edge_t edge
 #endif
 #include <stdint.h>
 #include <xs1.h>
+#include <xcore/channel.h>
 #include <xcore/hwtimer.h>
 #include <xcore/port.h>
+#include <xcore/select.h>
 
 #ifndef APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW
 #define APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW 0
 #endif
 
-/* XS3 tile-local, single-writer mailboxes. Every shared access uses one aligned
- * LDW/STW with a compiler memory barrier: the reader may see an old or new word,
- * never a partial word. No payload is published, no lock/channel rendezvous is
- * needed, and cosmetic updates may coalesce. Do not use this for buffer ownership.
- * XTC 15.3.1's __atomic builtins instead call out to runtime helpers. */
-static unsigned usb_word __attribute__((aligned(4)));
-static unsigned decode_word __attribute__((aligned(4)));
+/* Each writer keeps its own word and sends every new value to the LED task on
+ * its own channel. A send waits only for the LED task to take the word, which
+ * it does between PWM edges. Until a writer's channel is set its updates are
+ * kept but not sent. */
+static unsigned usb_word, decode_word;
+static chanend_t usb_end, decode_end;
 
-static unsigned sample_word(const unsigned *word)
+void activity_led_usb_init(chanend c) { usb_end = c; }
+void activity_led_decode_init(chanend c) { decode_end = c; }
+
+static void publish_word(unsigned *word, chanend_t end, unsigned flags)
 {
-    unsigned value;
-    __asm__ volatile("ldw %0, %1[0]" : "=r"(value) : "r"(word) : "memory");
-    return value;
+    *word = activity_led_next_word(*word, flags);
+    if (end) chan_out_word(end, *word);
 }
 
-static void publish_word(unsigned *word, unsigned flags)
-{
-    unsigned value = activity_led_next_word(sample_word(word), flags);
-    __asm__ volatile("stw %0, %1[0]" : : "r"(value), "r"(word) : "memory");
-}
+void activity_led_usb(unsigned flags) { publish_word(&usb_word, usb_end, flags); }
+void activity_led_decode(unsigned flags) { publish_word(&decode_word, decode_end, flags); }
 
-void activity_led_usb(unsigned flags) { publish_word(&usb_word, flags); }
-void activity_led_decode(unsigned flags) { publish_word(&decode_word, flags); }
-
-void activity_led_task(void)
+void activity_led_task(chanend c_usb, chanend c_decode)
 {
     const port_t port = XS1_PORT_32A; /* Board tile 1: bit 0 green, bit 1 red. */
     const unsigned invert = APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
     activity_led_effect_t effect = {{0, 0}, {0, 0}, 0, 0, 0, 0, 0};
     activity_led_edge_t edges[3];
-    unsigned duty[2] = {0}, count = 1, frame = 0;
+    unsigned words[2] = {0, 0}, duty[2] = {0}, count = 1, frame = 0;
     hwtimer_t timer = hwtimer_alloc();
     if (!timer) __builtin_trap();
     port_enable(port);
@@ -122,14 +119,28 @@ void activity_led_task(void)
     unsigned start = get_reference_time() + ACTIVITY_LED_PERIOD_TICKS;
     for (;;) {
         if (!frame) {
-            unsigned words[2] = {sample_word(&usb_word), sample_word(&decode_word)};
             activity_led_effect_step(&effect, words, duty);
             count = activity_led_pwm_edges(duty, edges);
         }
-        for (unsigned i = 0; i < count; ++i) {
-            hwtimer_wait_until(timer, start + edges[i].ticks);
-            port_out(port, edges[i].value ^ invert);
+        for (unsigned i = 0; i < count;) {
+            /* Take the writers' latest words while waiting for each edge. */
+            hwtimer_set_trigger_time(timer, start + edges[i].ticks);
+            SELECT_RES(CASE_THEN(timer, on_edge), CASE_THEN(c_usb, on_usb),
+                       CASE_THEN(c_decode, on_decode))
+            {
+            on_edge:
+                (void)hwtimer_get_time(timer);
+                port_out(port, edges[i++].value ^ invert);
+                break;
+            on_usb:
+                words[0] = chan_in_word(c_usb);
+                break;
+            on_decode:
+                words[1] = chan_in_word(c_decode);
+                break;
+            }
         }
+        hwtimer_clear_trigger_time(timer);
         start += ACTIVITY_LED_PERIOD_TICKS;
         frame = (frame + 1) % ACTIVITY_LED_UPDATE_MS;
         /* Keep absolute deadlines normally; skip missed periods after a debug

@@ -7,6 +7,7 @@
 #include "hostapp.h"
 #include "jpeg_pipeline.h"
 #include "mpeg_pipeline.h"
+#include "activity_led.h"
 #include "audio_pipeline.h"
 
 #include <spi.h>
@@ -26,6 +27,9 @@ void main()
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     chan c_audio;
 #endif
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
+    chan c_led_usb, c_led_decode;
+#endif
     chan xuhChans_out[NUM_EPS];
     chan xuhChans_in[NUM_EPS];
     interface spi_master_if lcd_spi[1];
@@ -41,17 +45,33 @@ void main()
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
         on tile[1]: mp2_audio_task(c_audio);
 #endif
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
+        /* The writers are on tile 0 and the LEDs on tile 1. */
+        on tile[1]: activity_led_task(c_led_usb, c_led_decode);
+#endif
         on tile[1]: spi_master(lcd_spi, 1, p_lcd_sclk, p_lcd_mosi,
                                null, p_lcd_cs, 1, lcd_spi_clock);
 #if MSC_JPEG_PIPELINE
         on tile[1]: jpeg_pipeline_receive(c_lcd_image, c_lcd_render);
         on tile[1]: lcd_display_task(lcd_spi[0], c_lcd_render);
-        on tile[0]: jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
+        on tile[0]:
+        {
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
+            activity_led_decode_init(c_led_decode);
+#endif
+            jpeg_pipeline_decode(c_jpeg_load, c_jpeg_output);
+        }
         on tile[0]: jpeg_pipeline_transmit(c_jpeg_output, c_lcd_image);
 #elif MSC_MPEG_PIPELINE
         on tile[1]: mpeg_pipeline_receive(c_lcd_image, c_lcd_render);
         on tile[1]: lcd_display_task(lcd_spi[0], c_lcd_render);
-        on tile[0]: mpeg_pipeline_decode(c_mpeg_load, c_lcd_image);
+        on tile[0]:
+        {
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
+            activity_led_decode_init(c_led_decode);
+#endif
+            mpeg_pipeline_decode(c_mpeg_load, c_lcd_image);
+        }
 #else
         on tile[1]: lcd_display_task(lcd_spi[0], c_lcd_image);
 #endif
@@ -65,6 +85,12 @@ void main()
 
         on tile[0]:
         {
+#if APP_XUH_MSC_PLAYER_ACTIVITY_LED
+            activity_led_usb_init(c_led_usb);
+#if !MSC_JPEG_PIPELINE && !MSC_MPEG_PIPELINE
+            activity_led_decode_init(c_led_decode);  /* No decoder in the LCD test. */
+#endif
+#endif
             USBHost(xuhChans_out, NUM_EPS, xuhChans_in, NUM_EPS
 #if MSC_JPEG_PIPELINE
                     , c_jpeg_load
