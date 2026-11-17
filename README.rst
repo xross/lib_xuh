@@ -30,11 +30,10 @@ The ``lib_xuh`` module provides the USB host transport, a host core that
 enumerates the attached device and describes it to the application, and a
 read-only mass storage class driver with optional FatFs disk functions.
 
-There are three examples for XK-EVK-XU316: ``app_xuh_msc``, a basic mass
-storage example that lists a directory and prints a text file;
-``app_xuh_msc_bench``, which measures mass storage read rates; and
-``app_xuh_msc_player``, a video player that reads from USB mass storage and renders
-to an SPI LCD. All are described in the library guide.
+There are two examples for XK-EVK-XU316: ``app_xuh_msc``, a basic mass
+storage example that lists a directory and prints a text file, and
+``app_xuh_msc_bench``, which measures mass storage read rates. A separate
+`USB media player <https://github.com/xross/sw_usb_media_player>`_ uses this library.
 
 ********
 Features
@@ -45,7 +44,7 @@ Features
 * Device enumeration, reporting the interfaces and endpoints of the device
 * Read-only mass storage class driver, with optional FatFs disk functions
 * Basic USB mass storage example and read-rate benchmark
-* Example USB mass storage video player application
+* Separate USB mass storage media player application
 * Support for mass storage devices with filesystem access (provided by FatFs)
 
 ************
@@ -71,13 +70,6 @@ Known issues
   (`#15 <https://github.com/xross/lib_xuh/issues/15>`__)
   and requires 512-byte blocks
   (`#16 <https://github.com/xross/lib_xuh/issues/16>`__).
-* The player's audio output is an optional I2S DAC and plays 48-kHz audio only;
-  there is no sample-rate conversion. Experimental audio-clock pacing uses
-  a 400-KiB video arena by default. Insufficient read-ahead can cause audio
-  underflows, reported on screen and at end of play; optional strict test builds
-  fail on underflow instead of continuing
-  (`#17 <https://github.com/xross/lib_xuh/issues/17>`__).
-  See the library guide for its media, memory and validation limits.
 * USB hubs are not supported
   (`#18 <https://github.com/xross/lib_xuh/issues/18>`__).
 * Mass storage is the only class driver; other classes can use the host core
@@ -101,10 +93,7 @@ Required libraries (dependencies)
 *********************************
 
 The library depends on ``lib_xud``. ``lib_fatfs`` is needed only by applications
-that set ``XUH_MSC_FATFS``, as both examples do. The video player also uses
-``lib_logging``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
-for its selected playback configuration; DAC output adds ``lib_i2s`` and
-``lib_sw_pll``. Versions are pinned in
+that set ``XUH_MSC_FATFS``, as both examples do. Versions are pinned in
 ``lib_xuh/lib_build_info.cmake`` and ``examples/deps.cmake``.
 
 *************************

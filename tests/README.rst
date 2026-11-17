@@ -26,4 +26,4 @@ success requires the packet checks and application completion messages, not just
 reaching the cycle limit.
 
 ``pytest.ini`` selects this library suite by default. The player's native and
-pipeline fixtures remain separate under ``examples/app_xuh_msc_player/tests``.
+pipeline fixtures live in the separate ``sw_usb_media_player`` repository.
