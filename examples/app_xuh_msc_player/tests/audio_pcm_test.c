@@ -26,7 +26,7 @@ int main(void)
     }
 
     /* Silence, and a stopped clock, until the prefill is reached. */
-    audio_pcm_reset(&q);
+    audio_pcm_reset(&q, 0);
     assert(push(0, AUDIO_PCM_PREFILL - 1) == AUDIO_PCM_PREFILL - 1);
     assert(pop() == 0 && !q.started && q.played == 0);
     assert(push(AUDIO_PCM_PREFILL - 1, 1) == 1);
@@ -54,15 +54,28 @@ int main(void)
     assert(pop() == 0 && q.played == played + 1);
 
     /* A play shorter than the prefill still plays, once the end is known. */
-    audio_pcm_reset(&q);
+    audio_pcm_reset(&q, 0);
     assert(push(0, 3) == 3 && pop() == 0 && !q.started);
     audio_pcm_finish(&q);
     assert(pop() == 1 && pop() == 2 && !q.drained && pop() == 3 && q.drained);
 
     /* An empty play drains at once. */
-    audio_pcm_reset(&q);
+    audio_pcm_reset(&q, 0);
     audio_pcm_finish(&q);
     assert(pop() == 0 && q.drained && !q.started);
+
+    /* A held start waits beyond the prefill for its release. */
+    audio_pcm_reset(&q, 1);
+    assert(push(0, AUDIO_PCM_PREFILL) == AUDIO_PCM_PREFILL);
+    assert(pop() == 0 && !q.started && q.played == 0);
+    audio_pcm_release(&q);
+    assert(pop() == 1 && q.started);
+
+    /* The end of the media starts held output too. */
+    audio_pcm_reset(&q, 1);
+    assert(push(0, 2) == 2 && pop() == 0 && !q.started);
+    audio_pcm_finish(&q);
+    assert(pop() == 1 && pop() == 2 && q.drained);
 
     puts("audio PCM queue tests passed");
     return 0;

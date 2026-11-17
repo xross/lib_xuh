@@ -12,14 +12,18 @@ enum { AUDIO_PCM_CAPACITY = 1024, AUDIO_PCM_PREFILL = 512 };
  * may be separated by half the position range. */
 typedef struct {
     int32_t samples[AUDIO_PCM_CAPACITY][2];
-    volatile unsigned delivered, played, started, eof, drained;
+    volatile unsigned delivered, played, started, eof, drained, hold;
     volatile unsigned missing, underflows, first_underflow;
     unsigned gap, gap_start, gap_confirmed;
 } audio_pcm_t;
 
 /* Reset only while both sides are quiescent (the hardware mailbox enforces it).
- * Slots need not be cleared: startup/delivered prevent stale reads on replay. */
-void audio_pcm_reset(audio_pcm_t *q);
+ * Slots need not be cleared: startup/delivered prevent stale reads on replay.
+ * With hold set, output does not start at the prefill: it waits for
+ * audio_pcm_release(), or for the end of the media. */
+void audio_pcm_reset(audio_pcm_t *q, unsigned hold);
+/* Producer: let held output start. */
+void audio_pcm_release(audio_pcm_t *q);
 /* Producer: consume up to count consecutive media frames, returning how many.
  * Late prefixes are discarded, never replayed. Zero means backpressure. */
 unsigned audio_pcm_push(audio_pcm_t *q, const int32_t *samples, unsigned count);

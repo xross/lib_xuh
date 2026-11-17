@@ -6,7 +6,7 @@
 enum { POLL_TICKS = 25000 };
 
 static audio_pcm_t pcm;
-static volatile unsigned reset_request, reset_ack;
+static volatile unsigned reset_request, reset_ack, reset_hold;
 
 /* The I2S callback: the only reader of the queue, and the only code that
  * resets it, so a reset never races a pop. */
@@ -14,7 +14,7 @@ void audio_dac_next(int32_t samples[2])
 {
     unsigned request = reset_request;
     if (request != reset_ack) {
-        audio_pcm_reset(&pcm);
+        audio_pcm_reset(&pcm, reset_hold);
         __asm__ volatile("" ::: "memory");
         reset_ack = request;
     }
@@ -30,12 +30,16 @@ static void wait_for(volatile unsigned *word, unsigned value)
     __asm__ volatile("" ::: "memory");
 }
 
-void audio_dac_reset(void)
+void audio_dac_reset(unsigned hold)
 {
+    reset_hold = hold;
+    __asm__ volatile("" ::: "memory");
     unsigned request = reset_request + 1;
     reset_request = request;
     wait_for(&reset_ack, request);
 }
+
+void audio_dac_release(void) { audio_pcm_release(&pcm); }
 
 unsigned audio_dac_write(const int32_t *samples, unsigned frames)
 {

@@ -92,7 +92,7 @@ PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data
     return rc;
 }
 
-static unsigned audio_offset_sent;
+static unsigned audio_offset_sent, audio_go_sent;
 
 static void publish_audio_timing(void)
 {
@@ -102,6 +102,10 @@ static void publish_audio_timing(void)
     if (have_start && !audio_offset_sent) {
         audio_pipeline_offset(mpeg_audio_channel, audio_start_ms);
         audio_offset_sent = 1;
+    }
+    if (!audio_go_sent && mpeg_pipeline_first_picture()) {
+        audio_pipeline_go(mpeg_audio_channel);
+        audio_go_sent = 1;
     }
     if (have_start && audio_pipeline_clock(&offset))
         mpeg_pipeline_audio_clock(offset - (unsigned)audio_start_ms * 100000u, 1);
@@ -134,8 +138,11 @@ VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
     if (!rc) {
         mpeg_ps_init(&mpeg_ps, mpeg_ps_disk_read, &mpeg_file);
         mpeg_pipeline_audio_clock(0, 0);
-        audio_offset_sent = 0;
-        if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_MSC_PLAYER_AUDIO_DECODE)) {
+        audio_offset_sent = audio_go_sent = 0;
+        /* Paced audio starts with the first picture. */
+        unsigned mode = APP_XUH_MSC_PLAYER_AUDIO_DECODE |
+            (APP_XUH_MSC_PLAYER_AUDIO_DECODE && APP_XUH_MSC_PLAYER_AUDIO_PACED ? AUDIO_WAIT_FOR_GO : 0);
+        if (audio_pipeline_start(mpeg_audio_channel, mode)) {
             audio_pipeline_stop(mpeg_audio_channel, audio_stats);
             f_close(&mpeg_file);
             return -1;

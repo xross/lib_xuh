@@ -2,9 +2,10 @@
 
 static inline void barrier(void) { __asm__ volatile("" ::: "memory"); }
 
-void audio_pcm_reset(audio_pcm_t *q)
+void audio_pcm_reset(audio_pcm_t *q, unsigned hold)
 {
     q->delivered = q->played = q->started = q->eof = q->drained = 0;
+    q->hold = hold;
     q->missing = q->underflows = q->first_underflow = 0;
     q->gap = q->gap_start = q->gap_confirmed = 0;
     barrier();
@@ -30,6 +31,12 @@ unsigned audio_pcm_push(audio_pcm_t *q, const int32_t *samples, unsigned count)
     return skip + copy;
 }
 
+void audio_pcm_release(audio_pcm_t *q)
+{
+    barrier();
+    q->hold = 0;
+}
+
 void audio_pcm_finish(audio_pcm_t *q)
 {
     barrier();
@@ -48,7 +55,7 @@ void audio_pcm_pop(audio_pcm_t *q, int32_t samples[2])
             if (eof) q->drained = 1;
             return;
         }
-        if (delivered < AUDIO_PCM_PREFILL && !eof) return;
+        if ((delivered < AUDIO_PCM_PREFILL || q->hold) && !eof) return;
         q->started = 1;
     }
     unsigned played = q->played;

@@ -55,7 +55,7 @@ def main():
         (work / "run.log").write_text(output)
         failed = result.returncode != 0
         print(output, end="")
-    marker = "PASS: DAC audio pipeline 8 cases;" if args.dac else "PASS: audio pipeline 10 cases;"
+    marker = "PASS: DAC audio pipeline 10 cases;" if args.dac else "PASS: audio pipeline 10 cases;"
     if failed or marker not in output:
         raise SystemExit("Audio pipeline did not complete the selected fixture")
 

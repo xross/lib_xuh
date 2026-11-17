@@ -136,6 +136,33 @@ static void starvation(chanend audio, chanend consumer, hwtimer_t timer)
     if (!APP_XUH_MSC_PLAYER_PACING_STRICT) assert(stats[AUDIO_BLOCKS] == 4);
 }
 
+/* A held start: queued audio stays silent, with the clock stopped, until the
+ * go and the display latency after it; or, without a go, the end of input. */
+static void held_start(chanend audio, chanend consumer, hwtimer_t timer, unsigned go)
+{
+    unsigned snapshot[FIXTURE_WORDS], stats[AUDIO_STATS_WORDS], clock;
+    start(audio, consumer, 1 | AUDIO_WAIT_FOR_GO);
+    assert(audio_pipeline_send(audio, input, 1152) == 0);
+    hwtimer_delay(timer, 10000000u);
+    observe(consumer, FIXTURE_SNAPSHOT, 0, snapshot);
+    assert(!snapshot[DAC_STARTED] && !snapshot[DAC_PLAYED] && !snapshot[FIXTURE_NONZERO]);
+    assert(!audio_pipeline_clock(&clock));
+    if (go) {
+        audio_pipeline_go(audio);
+        hwtimer_delay(timer, (APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS - 10) * 100000u);
+        observe(consumer, FIXTURE_SNAPSHOT, 0, snapshot);
+        assert(!snapshot[DAC_STARTED]);
+        hwtimer_delay(timer, 2000000u);
+        observe(consumer, FIXTURE_SNAPSHOT, 0, snapshot);
+        assert(snapshot[DAC_STARTED] && snapshot[DAC_PLAYED]);
+    }
+    assert(audio_pipeline_send(audio, input + 1152, 576) == 0);
+    audio_pipeline_stop(audio, stats);
+    assert(!stats[AUDIO_ERRORS] && !stats[AUDIO_UNDERFLOWS] && stats[AUDIO_BLOCKS] == 3);
+    observe(consumer, FIXTURE_SNAPSHOT, 0, snapshot);
+    assert(snapshot[FIXTURE_CAPTURED] == FIXTURE_FRAMES && snapshot[FIXTURE_HASH] == reference_hash);
+}
+
 /* Same provisional MP2 stack bound as the production task: PL_MPEG's unused
  * indirect callbacks prevent complete automatic analysis. */
 #pragma stackfunction 1024
@@ -160,7 +187,10 @@ void test_dac_pipeline(chanend audio, chanend consumer)
     puts("DAC case 7: silence, continuous clock and underflow/strict failure"); fflush(stdout);
     complete(audio, consumer, 1728, timer, 0);
     puts("DAC case 8: clean replay after underflow/strict failure"); fflush(stdout);
-    puts("PASS: DAC audio pipeline 8 cases; real queue/mailbox, timed callback, no I2S pins");
+    held_start(audio, consumer, timer, 1);
+    held_start(audio, consumer, timer, 0);
+    puts("DAC cases 9-10: start held for the first picture, and released by the end of input"); fflush(stdout);
+    puts("PASS: DAC audio pipeline 10 cases; real queue/mailbox, timed callback, no I2S pins");
     exit(0);
 }
 

@@ -41,6 +41,9 @@ unsigned char *mpeg_pipeline_input_buffer(unsigned slot);
  * get_reference_time() less offset. The decoder holds each picture until then.
  * Underflow does not invalidate/restart this clock. */
 void mpeg_pipeline_audio_clock(unsigned offset, unsigned valid);
+/* Loader: whether the current play's first picture has been handed over for
+ * display. The audio is started then, so that the two begin together. */
+unsigned mpeg_pipeline_first_picture(void);
 #endif
 #endif
 #endif

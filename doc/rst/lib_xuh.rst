@@ -434,8 +434,8 @@ reduce quality or bitrate if an encode exceeds that bound.
 
 RGB slots retain the screen stride and capacity. Each slot's black borders are
 cleared when its picture dimensions change; only the centred picture rectangle
-is transmitted each frame. The physical LCD is cleared when dimensions change
-to remove a previous larger picture. The FPS gauge always occupies the same
+is transmitted each frame. When the dimensions change, the area of the LCD
+around the new picture is cleared to remove a previous larger one. The FPS gauge always occupies the same
 screen rectangle, (4, 4) through (107, 25), regardless of video size. Small text
 sits above a 96-pixel-wide bar, with four black rows before a centred
 320 x 180 picture. If the
@@ -550,6 +550,24 @@ starts once 512 frames are queued, and from then on its count of frames played
 is the audio clock that video is paced against. The MP2 task keeps one decoded
 block, in the decoder's own memory, until the queue has taken all of it.
 
+Audio and video start together. The audio is decoded and queued from the start
+of the file, but its output is held until the decoder hands over the first
+picture; it then starts after the display latency, as that picture appears.
+Later pictures wait for the audio clock as usual; the loader takes the clock
+from the moment it asks for the start, until an acknowledgement confirms it.
+
+Nothing is played while the start is held, so the audio that the file delivers
+in the meantime has to wait. An optional buffer in front of the MP2 decoder
+gives it room: ``APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES`` in ``src/video_config.h``
+sets its size, 8 KiB by default on tile 1, about a third of a second at
+192 kbit/s; 0 leaves it out. The reference clip delivers about 4 KiB of audio
+before its first picture. When there is no room left, in the buffer or without
+it in the decoder's own 4-KiB input, the audio starts at once; the first
+picture or two of the play are then late and nothing else is affected. The
+buffer matters only for that: with it left out, the reference clip shows its
+first picture about 55 ms late and the next about 10 ms late, and plays the
+rest identically. The stand-in starts in the same way.
+
 If the queue runs empty the DAC plays silence and the clock keeps running. PCM
 that arrives after its time is dropped. The underflow count, the missing
 duration and strict mode work as for the stand-in. At the end of a play the
@@ -655,8 +673,8 @@ library plane strides. Tile 1 converts a 960-byte strip directly into one of its
 two RGB565 framebuffers; no full RGB888 or extra YUV framebuffer is allocated.
 Once conversion, overlay and optional hashing finish, tile 1 acknowledges YUV
 ownership before waiting for the previous LCD render. The next send backpressures
-until a safe RGB slot is available. Frame zero waits for the first LCD completion;
-EOF drains the final render before statistics return.
+until a safe RGB slot is available. EOF drains the final render before
+statistics return.
 
 Pointers remain on their owning tile; pixel bytes cross tiles. Channel messages
 end with CT_END, and ownership handoffs include compiler memory barriers.
@@ -665,9 +683,9 @@ be reused only after rendering completes. Multi-sector READ(10) commands serve
 FatFs reads, with at most 64 512-byte sectors per command. Display work and
 filesystem reads do not execute inside the USB manager.
 
-The large memory model is required. A default MPEG-1 build uses 478708 bytes on
-tile 0 and 334844 bytes on tile 1, including code, data and reserved stacks;
-45580 bytes remain on tile 0. These are build-dependent figures, not an SRAM
+The large memory model is required. A default MPEG-1 build uses 478828 bytes on
+tile 0 and 335644 bytes on tile 1, including code, data and reserved stacks;
+45460 bytes remain on tile 0. These are build-dependent figures, not an SRAM
 budget for arbitrary additions. The decoder's 16-KiB stack reservation is
 provisional because callback branches prevent complete automatic analysis.
 
@@ -853,14 +871,14 @@ same runner::
 
 Repeat in a separate build directory with ``-DTEST_AUDIO_STRICT=ON`` to check
 strict underflow failure and recovery. ``TEST_AUDIO_DAC`` requires the default
-S32 sample format. Eight cases exercise the real DAC audio-task branch,
+S32 sample format. Ten cases exercise the real DAC audio-task branch,
 ``audio_dac_queue.c`` and ``audio_pcm.c``. A tile-1 timer calls the actual
 ``audio_dac_next()`` at 48 kHz in place of the I2S/PLL adapter. The checks cover
 silent startup, complete queued-PCM drain before STOP returns, every stereo
 pair's rolling hash against an independent tile-0 decode, fragmented replay,
 bypass, empty/truncated/malformed input, silence with a continuing clock during
-starvation, confirmed underflow accounting, strict-error silencing and clean
-restart. An idle tail before STOP must not count as an underflow. A three-second
+starvation, confirmed underflow accounting, strict-error silencing, clean
+restart and a start held for the first picture. An idle tail before STOP must not count as an underflow. A three-second
 target watchdog and the runner's cycle/host-time bounds make deadlock a failure.
 The runner requires the selected fixture's own completion marker; a stand-in
 pass does not count as a DAC pass.

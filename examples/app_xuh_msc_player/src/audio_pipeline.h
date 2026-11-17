@@ -25,7 +25,7 @@
 
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
 #include <xccompat.h>
-enum { AUDIO_START = 1, AUDIO_DATA = 2, AUDIO_STOP = 3, AUDIO_OFFSET = 4,
+enum { AUDIO_START = 1, AUDIO_DATA = 2, AUDIO_STOP = 3, AUDIO_OFFSET = 4, AUDIO_GO = 5,
        AUDIO_CHUNK_BYTES = 1024 };
 /* AUDIO_HELD_SAMPLES is the historical name for missing-audio duration:
  * silence with the DAC, last-pair hold with the stand-in. */
@@ -35,7 +35,15 @@ enum { AUDIO_BYTES, AUDIO_BLOCKS, AUDIO_SAMPLES, AUDIO_RATE, AUDIO_DECODE_US,
        AUDIO_FIRST_UNDERFLOW, AUDIO_STATS_WORDS };
 void mp2_audio_task(chanend channel);
 #ifndef __XC__
+/* decode: 0 to count bytes only, 1 to decode. With AUDIO_WAIT_FOR_GO added,
+ * paced output does not start until audio_pipeline_go(), so that it can begin
+ * with the first picture; it starts anyway when the decoder can take no more
+ * input, or at the end of the input. */
+enum { AUDIO_WAIT_FOR_GO = 2 };
 int audio_pipeline_start(chanend channel, unsigned decode);
+/* The first picture has been handed over for display: start the output once
+ * that picture can be on the display. Not acknowledged. */
+void audio_pipeline_go(chanend channel);
 /* Tell the audio task when the stream's audio starts, relative to its first
  * picture, so the gauge can compare audio and video on one timeline. Optional,
  * once per play, not acknowledged. */
@@ -49,7 +57,9 @@ int audio_pipeline_send(chanend channel, const unsigned char *data, unsigned byt
 /* The sender's view of the paced audio clock, from the newest acknowledgement:
  * the audio played so far, in reference-timer ticks, is get_reference_time()
  * less *offset on the sender's tile. Once started it remains valid through
- * underflows. Returns 0 when unpaced, before startup, or on failure. */
+ * underflows. After audio_pipeline_go() it is the clock the go asks for, until
+ * an acknowledgement confirms the start. Returns 0 when unpaced, before
+ * startup, or on failure. */
 int audio_pipeline_clock(unsigned *offset);
 /* End input and drain buffered audio at its sample rate before returning.
  * Underflow counters exclude startup and the tail beyond normal audio EOF. */

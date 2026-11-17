@@ -45,7 +45,7 @@ class HardwareRunnerTests(unittest.TestCase):
 
     def test_audio_rejects_failure_or_pass_marker_only_on_stderr(self):
         for dac, marker in ((False, "PASS: audio pipeline 10 cases; checked\n"),
-                            (True, "PASS: DAC audio pipeline 8 cases; checked\n")):
+                            (True, "PASS: DAC audio pipeline 10 cases; checked\n")):
             for success, stderr in ((False, ""), (True, marker)):
                 with self.subTest(dac=dac, success=success), tempfile.TemporaryDirectory() as directory:
                     work = Path(directory)
@@ -69,7 +69,7 @@ class HardwareRunnerTests(unittest.TestCase):
                     def ffmpeg(*args, **kwargs):
                         (work / "short.mp2").write_bytes(bytes(1728))
 
-                    marker = "PASS: DAC audio pipeline 8 cases; checked\n" if dac_output else \
+                    marker = "PASS: DAC audio pipeline 10 cases; checked\n" if dac_output else \
                         "PASS: audio pipeline 10 cases; checked\n"
                     args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", directory,
                             "--adapter-id", "SERIAL"] + (["--dac"] if dac else [])

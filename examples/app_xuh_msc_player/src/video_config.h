@@ -41,4 +41,19 @@
 #if APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS < 0 || APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS > 500
 #error APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS must be between 0 and 500
 #endif
+
+/* Optional room, in bytes, for compressed audio waiting for the MP2 decoder
+ * when playback is paced, on the audio task's tile; 0 leaves it out. Audio and
+ * video start together, so the audio that the file delivers before the first
+ * picture is ready has to wait. Without this room it waits in the decoder's
+ * own 4-KiB input, and when that is full the audio starts early: the first
+ * picture or two of a play are then late (the reference clip's first by about
+ * 55 ms) and nothing else changes. Size it as the audio bitrate times the wait: 8 KiB is about a third of a second at 192 kbit/s. The reference
+ * clip delivers about 4 KiB before its first picture. */
+#ifndef APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES
+#define APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES (8 * 1024)
+#endif
+#if APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES && APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES < 1024
+#error APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES must be 0 or at least 1024
+#endif
 #endif

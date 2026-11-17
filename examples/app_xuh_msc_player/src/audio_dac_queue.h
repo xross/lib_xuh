@@ -10,8 +10,10 @@ enum { DAC_PLAYED, DAC_STARTED, DAC_UNDERFLOWS, DAC_MISSING,
        DAC_FIRST_UNDERFLOW, DAC_STATUS_WORDS };
 
 /* Empty the queue for a new play, or after an error: output is silence until
- * PCM is written again. Waits for the I2S callback to take the request. */
-void audio_dac_reset(void);
+ * PCM is written again. With hold set, output then also waits for
+ * audio_dac_release(). Waits for the I2S callback to take the request. */
+void audio_dac_reset(unsigned hold);
+void audio_dac_release(void);
 /* Queue as much of the PCM as fits and return the frames taken. Frames whose
  * time has already passed are taken and dropped. Zero means the queue is full. */
 unsigned audio_dac_write(const int32_t *samples, unsigned frames);

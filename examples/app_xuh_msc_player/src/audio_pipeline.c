@@ -13,11 +13,21 @@
 /* The MP2 decoder is lib_mpeg's; this task owns its memory. */
 static unsigned char audio_memory[MPEG_AUDIO_MEMORY_SIZE] __attribute__((aligned(8)));
 
-/* Sender's tile: the audio clock as of the newest acknowledgement. */
-static unsigned clock_offset, clock_valid;
+/* A held start goes ahead this long after its go: the time the picture that
+ * prompted the go takes to appear. */
+enum { START_LATENCY_TICKS = APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS * (AUDIO_REFERENCE_HZ / 1000) };
+
+/* Sender's tile: the audio clock as of the newest acknowledgement. Between a
+ * go and the first acknowledgement that confirms the start, the clock is the
+ * one the go asks for, so that the sender need not wait to learn of it. */
+static unsigned clock_offset, clock_valid, go_expected, go_time;
 
 int audio_pipeline_clock(unsigned *offset)
 {
+    if (!clock_valid && go_expected) {
+        *offset = go_time + START_LATENCY_TICKS;
+        return 1;
+    }
     *offset = clock_offset;
     return (int)clock_valid;
 }
@@ -25,7 +35,7 @@ int audio_pipeline_clock(unsigned *offset)
 int audio_pipeline_start(chanend channel, unsigned decode)
 {
     unsigned header[2] = {AUDIO_START, decode}, result;
-    clock_valid = 0;
+    clock_valid = go_expected = 0;
     pipeline_send(channel, header, 2);
     pipeline_receive(channel, &result, 1);
     return (int)result;
@@ -37,8 +47,95 @@ void audio_pipeline_offset(chanend channel, int milliseconds)
     pipeline_send(channel, message, 2);
 }
 
+void audio_pipeline_go(chanend channel)
+{
+    unsigned message[2] = {AUDIO_GO, 0};
+    pipeline_send(channel, message, 2);
+    go_time = get_reference_time();
+    go_expected = 1;
+}
+
 /* Audio task: media time of the first audio sample, from AUDIO_OFFSET. */
 static int media_start_ms;
+
+/* Audio task, paced: compressed audio on its way to the decoder. With
+ * APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES it waits in a buffer in front of the
+ * decoder's own input; without, it goes straight to the decoder. */
+#if APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES
+static struct {
+    unsigned char bytes[APP_XUH_MSC_PLAYER_AUDIO_WAIT_BYTES];
+    unsigned head, count;
+} waiting;
+
+static void waiting_reset(void) { waiting.head = waiting.count = 0; }
+static unsigned waiting_count(void) { return waiting.count; }
+
+/* Whether another chunk can be taken from the sender. */
+static unsigned waiting_room(void)
+{
+    return sizeof(waiting.bytes) - waiting.count >= AUDIO_CHUNK_BYTES;
+}
+
+/* Take a chunk. Returns the bytes that reached the decoder, or -1 on a
+ * decoder error. */
+static int waiting_put(const unsigned char *data, unsigned bytes)
+{
+    unsigned tail = (waiting.head + waiting.count) % sizeof(waiting.bytes);
+    unsigned first = sizeof(waiting.bytes) - tail;
+    if (first > bytes) first = bytes;
+    memcpy(waiting.bytes + tail, data, first);
+    memcpy(waiting.bytes, data + first, bytes - first);
+    waiting.count += bytes;
+    return 0;
+}
+
+/* Give the decoder as much as it has room for. Returns the bytes moved, or -1
+ * on a decoder error. */
+static int waiting_feed(void)
+{
+    int moved = 0;
+    while (waiting.count) {
+        unsigned count = (unsigned)mpeg_audio_input_space();
+        if (count > waiting.count) count = waiting.count;
+        if (count > sizeof(waiting.bytes) - waiting.head) count = sizeof(waiting.bytes) - waiting.head;
+        if (!count) break;
+        if (mpeg_audio_feed(waiting.bytes + waiting.head, count) < 0) return -1;
+        waiting.head = (waiting.head + count) % sizeof(waiting.bytes);
+        waiting.count -= count;
+        moved += (int)count;
+    }
+    return moved;
+}
+#else
+static void waiting_reset(void) {}
+static unsigned waiting_count(void) { return 0; }
+static unsigned waiting_room(void) { return mpeg_audio_input_space() >= AUDIO_CHUNK_BYTES; }
+static int waiting_put(const unsigned char *data, unsigned bytes)
+{
+    return mpeg_audio_feed(data, bytes) < 0 ? -1 : (int)bytes;
+}
+static int waiting_feed(void) { return 0; }
+#endif
+
+/* Audio task: a start held for AUDIO_GO. The picture that prompted the go takes
+ * the display latency to appear, so the output starts that long after it. */
+static struct { unsigned held, go, go_time; } start_gate;
+
+/* Whether a held start may now go ahead. Nothing is played while it is held,
+ * so the sender would be kept waiting once there is no room for its audio:
+ * start then, without the go, and at the end of the input. */
+static unsigned start_due(unsigned now, unsigned stopping)
+{
+    if (stopping || !waiting_room()) return 1;
+    return start_gate.go && (int)(now - (start_gate.go_time + START_LATENCY_TICKS)) >= 0;
+}
+
+/* The task's next wake-up, brought forward to a held start that has its go. */
+static unsigned start_wake(unsigned wake)
+{
+    unsigned due = start_gate.go_time + START_LATENCY_TICKS;
+    return start_gate.held && start_gate.go && (int)(due - wake) < 0 ? due : wake;
+}
 
 int audio_pipeline_send(chanend channel, const unsigned char *data, unsigned bytes)
 {
@@ -60,6 +157,8 @@ int audio_pipeline_send(chanend channel, const unsigned char *data, unsigned byt
         if (consumed[0] != AUDIO_DATA) __builtin_trap();
         clock_offset = get_reference_time() - consumed[1];
         clock_valid = consumed[2];
+        /* The start is confirmed, or will not happen. */
+        if (consumed[2] || consumed[3]) go_expected = 0;
         failed |= consumed[3];
         data += count;
         bytes -= count;
@@ -159,10 +258,14 @@ static unsigned begin_play(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
     pipeline_receive(channel, header, 2);
     if (header[0] != AUDIO_START) __builtin_trap();
     media_start_ms = 0;
+    unsigned decode = header[1] & 1;
+    start_gate.held = decode && (header[1] & AUDIO_WAIT_FOR_GO);
+    start_gate.go = 0;
+    waiting_reset();
 #if APP_XUH_MSC_PLAYER_AUDIO_DAC
-    audio_dac_reset();
+    audio_dac_reset(start_gate.held);
 #endif
-    unsigned decode = header[1], result = decode &&
+    unsigned result = decode &&
         mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
 #if DECODE_LEAD_ENABLED
     decode_lead_publish(0, 0);
@@ -177,8 +280,8 @@ static unsigned begin_play(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
 }
 
 /* One message from the sender, once the channel is ready. Returns its
- * operation: AUDIO_DATA with *bytes of payload, AUDIO_STOP, or AUDIO_OFFSET,
- * which is handled here. */
+ * operation: AUDIO_DATA with *bytes of payload, AUDIO_STOP, or AUDIO_OFFSET
+ * or AUDIO_GO, which are handled here. */
 static unsigned receive_message(chanend channel, unsigned payload[AUDIO_CHUNK_BYTES / 4],
                                 unsigned *bytes)
 {
@@ -189,6 +292,9 @@ static unsigned receive_message(chanend channel, unsigned payload[AUDIO_CHUNK_BY
         for (unsigned i = 0; i < (value + 3) / 4; ++i) payload[i] = chanend_in_word(channel);
     } else if (operation == AUDIO_OFFSET) {
         media_start_ms = (int)value;
+    } else if (operation == AUDIO_GO) {
+        start_gate.go = 1;
+        start_gate.go_time = get_reference_time();
     } else if (operation != AUDIO_STOP) {
         __builtin_trap();
     }
@@ -242,9 +348,9 @@ static void dac_progress(unsigned status[DAC_STATUS_WORDS], unsigned stats[AUDIO
 
 /* Output to the DAC. The I2S callback plays the PCM queue at the sample rate;
  * this task keeps it fed. One decoded block is held, in the decoder's own
- * memory, until the queue has taken all of it. Compressed audio waits in the
- * decoder's input buffer, and a chunk is taken from the sender only when there
- * is room. The audio clock reported to the sender is the count of frames the
+ * memory, until the queue has taken all of it. Compressed audio waits on its
+ * way to the decoder, and a chunk is taken from the sender only when there is
+ * room. The audio clock reported to the sender is the count of frames the
  * DAC has played. The stack bound is provisional, as for the stand-in. */
 #pragma stackfunction 1024
 void mp2_audio_task(chanend channel)
@@ -262,6 +368,18 @@ void mp2_audio_task(chanend channel)
             unsigned failed = stats[AUDIO_ERRORS] || strict_failed(stats);
             unsigned active = decode && !failed;
             if (active) {
+                int fed = waiting_feed();
+                if (fed > 0) need_input = 0;
+                /* Or there is input that yields no block and no room for more. */
+                if (fed < 0 || (!fed && need_input && !remaining &&
+                                (waiting_count() || !waiting_room()))) {
+                    ++stats[AUDIO_ERRORS];
+                    continue;
+                }
+                if (start_gate.held && start_due(get_reference_time(), stopping)) {
+                    audio_dac_release();
+                    start_gate.held = 0;
+                }
                 if (!remaining && !need_input) {
                     mpeg_audio_frame_t frame;
                     mpeg_result_t next = decode_block(&frame, stats);
@@ -288,7 +406,7 @@ void mp2_audio_task(chanend channel)
                 /* Have the next block decoded before the queue needs it. */
                 if (!remaining && !need_input) continue;
             } else if (failed && !silenced) {
-                audio_dac_reset();
+                audio_dac_reset(0);
                 remaining = 0;
                 silenced = 1;
 #if DECODE_LEAD_ENABLED
@@ -303,12 +421,11 @@ void mp2_audio_task(chanend channel)
                 pipeline_send(channel, consumed, 4);
                 acknowledge = 0;
             }
-            if (stopping && (!active || (need_input && !remaining))) break;
-            unsigned accept = !active || mpeg_audio_input_space() >= AUDIO_CHUNK_BYTES;
-            /* A full buffer that yields no block would never drain. */
-            if (!accept && !remaining) { ++stats[AUDIO_ERRORS]; continue; }
-            unsigned timed = active && (remaining || status[DAC_STARTED]);
-            if (timed) hwtimer_set_trigger_time(timer, get_reference_time() + DAC_POLL_TICKS);
+            if (stopping && (!active || (need_input && !remaining && !waiting_count()))) break;
+            unsigned accept = !active || waiting_room();
+            unsigned timed = active && (remaining || status[DAC_STARTED] || start_gate.held);
+            if (timed) hwtimer_set_trigger_time(timer,
+                start_wake(get_reference_time() + DAC_POLL_TICKS));
             SELECT_RES_ORDERED(CASE_GUARD_THEN(timer, timed, on_poll),
                                CASE_GUARD_THEN(channel, accept && !stopping, on_message))
             {
@@ -318,8 +435,9 @@ void mp2_audio_task(chanend channel)
                 if (operation != AUDIO_DATA) break;
                 stats[AUDIO_BYTES] += bytes;
                 if (active) {
-                    if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) ++stats[AUDIO_ERRORS];
-                    else need_input = 0;
+                    int put = waiting_put((const unsigned char *)payload, bytes);
+                    if (put < 0) ++stats[AUDIO_ERRORS];
+                    else if (put) need_input = 0;
                 }
                 acknowledge = 1;
                 break;
@@ -381,7 +499,17 @@ void mp2_audio_task(chanend channel)
                     held_output[1] = tail[1];
                     playing = 0;
                 }
-                if (!pending && !need_input) {
+                int fed = waiting_feed();
+                if (fed > 0) need_input = 0;
+                /* Or the decoder is full of input that yields no block. */
+                if (fed < 0 || (!fed && need_input && !pending && !playing &&
+                                (waiting_count() || !waiting_room()))) {
+                    ++stats[AUDIO_ERRORS];
+                    continue;
+                }
+                if (start_gate.held && start_due(now, stopping)) start_gate.held = 0;
+                /* The clock starts with the first decoded block. */
+                if (!pending && !need_input && !start_gate.held) {
                     mpeg_audio_frame_t frame;
                     mpeg_result_t next = decode_block(&frame, stats);
                     if (next == MPEG_FRAME) {
@@ -440,13 +568,11 @@ void mp2_audio_task(chanend channel)
                 pipeline_send(channel, consumed, 4);
                 acknowledge = 0;
             }
-            if (stopping && (!active || (need_input && !pending && !playing))) break;
-            unsigned accept = !active || mpeg_audio_input_space() >= AUDIO_CHUNK_BYTES;
-            /* A full buffer that yields no block would never drain. */
-            if (!accept && !playing && !pending) { ++stats[AUDIO_ERRORS]; continue; }
-            unsigned timed = active && playback.started;
+            if (stopping && (!active || (need_input && !pending && !playing && !waiting_count()))) break;
+            unsigned accept = !active || waiting_room();
+            unsigned timed = active && (playback.started || start_gate.held);
             if (timed) hwtimer_set_trigger_time(timer,
-                playing ? due : get_reference_time() + AUDIO_REFERENCE_HZ / 100);
+                playing ? due : start_wake(get_reference_time() + AUDIO_REFERENCE_HZ / 100));
             /* Service a ready deadline before another compressed input chunk. */
             SELECT_RES_ORDERED(CASE_GUARD_THEN(timer, timed, on_due),
                                CASE_GUARD_THEN(channel, accept && !stopping, on_message))
@@ -457,17 +583,19 @@ void mp2_audio_task(chanend channel)
                 if (operation != AUDIO_DATA) break;
                 stats[AUDIO_BYTES] += bytes;
                 if (decode && !stats[AUDIO_ERRORS] && !strict_failed(stats)) {
-                    if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) {
+                    if (paced) {
+                        int put = waiting_put((const unsigned char *)payload, bytes);
+                        if (put < 0) ++stats[AUDIO_ERRORS];
+                        else if (put) need_input = 0;
+                    } else if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) {
                         ++stats[AUDIO_ERRORS];
-                    } else if (!paced) {
+                    } else {
                         /* Decode and discard everything that has arrived. */
                         mpeg_audio_frame_t frame;
                         mpeg_result_t next;
                         while ((next = decode_block(&frame, stats)) == MPEG_FRAME)
                             output_block(&frame, stats, &media_clock);
                         if (next < 0) ++stats[AUDIO_ERRORS];
-                    } else {
-                        need_input = 0;
                     }
                 }
 #if DECODE_LEAD_ENABLED

@@ -253,6 +253,32 @@ static void lcd_write_video_row(client spi_master_if spi,
         spi.transfer_array(&data[offset], null, 8);
 }
 
+#if MSC_MPEG_PIPELINE
+/* Widths are multiples of four pixels, as lcd_write_video_row() needs. */
+static void lcd_fill_rows(client spi_master_if spi, unsigned x, unsigned y,
+                          unsigned width, unsigned height)
+{
+    uint8_t line[LCD_WIDTH * 2] = {0};      /* RGB565 black */
+
+    if (!width || !height) return;
+    lcd_begin_window(spi, x, y, x + width - 1, y + height - 1);
+    for (unsigned row = 0; row < height; ++row)
+        lcd_write_video_row(spi, line, width * 2);
+    spi.end_transaction(0);
+}
+
+/* Black out the screen around a picture; the picture's own write covers the
+ * rest. Nothing is written for a full-screen picture. */
+static void lcd_clear_borders(client spi_master_if spi, video_window_t window)
+{
+    unsigned below = window.y + window.height, right = window.x + window.width;
+    lcd_fill_rows(spi, 0, 0, LCD_WIDTH, window.y);
+    lcd_fill_rows(spi, 0, below, LCD_WIDTH, LCD_HEIGHT - below);
+    lcd_fill_rows(spi, 0, window.y, window.x, window.height);
+    lcd_fill_rows(spi, right, window.y, LCD_WIDTH - right, window.height);
+}
+#endif
+
 static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 {
     unsigned expected = 0;
@@ -290,7 +316,7 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
             unsigned char * unsafe buffer = mpeg_pipeline_lcd_buffer(slot);
             video_window_t window = mpeg_pipeline_lcd_window(slot);
             if (window.width != previous_width || window.height != previous_height) {
-                lcd_fill_screen(spi, RGB565_BLACK);
+                lcd_clear_borders(spi, window);
                 previous_width = window.width;
                 previous_height = window.height;
             }

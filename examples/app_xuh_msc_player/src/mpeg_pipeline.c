@@ -49,11 +49,17 @@ static void report_frame_timing(const char *name, const frame_timing_t *timing)
 enum { TICKS_PER_MS = 100000,
        /* From a decoded picture being released to the end of its write to the display. */
        DISPLAY_LATENCY_TICKS = APP_XUH_MSC_PLAYER_DISPLAY_LATENCY_MS * TICKS_PER_MS,
-       PACE_POLL_TICKS = 2 * TICKS_PER_MS };
+       PACE_POLL_TICKS = 2 * TICKS_PER_MS,
+       /* How long pictures after the first wait for the audio clock to start. */
+       CLOCK_WAIT_TICKS = 600 * TICKS_PER_MS };
 
 /* One loader writer and one decoder reader on the same tile. Clock validity
  * is separate from the offset: full clips wrap the reference-timer clock. */
 static volatile unsigned audio_clock_offset, audio_clock_valid;
+/* Set by the decoder while a play has had its first picture handed over. */
+static volatile unsigned first_picture;
+
+unsigned mpeg_pipeline_first_picture(void) { return first_picture; }
 
 void mpeg_pipeline_audio_clock(unsigned offset, unsigned valid)
 {
@@ -162,6 +168,8 @@ typedef struct {
     unsigned input_high_water;
     /* Pictures that started more than 10 ms after they were due, and the worst. */
     unsigned late_pictures, latest_ticks;
+    /* The audio clock has been valid in this play; or was waited for in vain. */
+    unsigned clock_seen, clock_given_up, first_shown;
     hwtimer_t timer;
 } input_t;
 
@@ -224,8 +232,9 @@ static mpeg_result_t take_input(chanend c_load, input_t *in)
 }
 
 /* Wait until the decoded picture, the one after `pictures` already shown, is
- * due on the audio clock, taking video meanwhile. Returns at once when there is no audio clock
- * or the frame rate is not yet known. Returns MPEG_NEED_INPUT, or a negative
+ * due on the audio clock, taking video meanwhile. Returns at once for the first
+ * picture before the clock starts, when the clock has stopped or never started,
+ * or when the frame rate is not yet known. Returns MPEG_NEED_INPUT, or a negative
  * result on failure. */
 static mpeg_result_t hold_picture(chanend c_load, input_t *in, unsigned pictures,
                                   unsigned rate_num, unsigned rate_den)
@@ -235,9 +244,23 @@ static mpeg_result_t hold_picture(chanend c_load, input_t *in, unsigned pictures
     unsigned picture = (unsigned)((unsigned long long)pictures * 100000000ull * rate_den / rate_num);
     unsigned first = 1;
     for (;;) {
-        if (!audio_clock_valid) return MPEG_NEED_INPUT;
-        unsigned played = get_reference_time() - audio_clock_offset;
-        int early = (int)(picture - DISPLAY_LATENCY_TICKS - played);
+        int early;
+        if (audio_clock_valid) {
+            unsigned played = get_reference_time() - audio_clock_offset;
+            early = (int)(picture - DISPLAY_LATENCY_TICKS - played);
+            in->clock_seen = 1;
+        } else {
+            /* The audio starts when the first picture is handed over, so that
+             * picture goes at once and the next ones wait for the clock. A
+             * clock that stops, or never starts, does not hold the video. */
+            if (!pictures || in->clock_seen || in->clock_given_up) return MPEG_NEED_INPUT;
+            if (get_reference_time() - in->first_shown > CLOCK_WAIT_TICKS) {
+                in->clock_given_up = 1;
+                return MPEG_NEED_INPUT;
+            }
+            early = PACE_POLL_TICKS;
+            first = 0;
+        }
         if (early <= 0) {
             if (first && -early > 10 * TICKS_PER_MS) {
                 ++in->late_pictures;
@@ -333,6 +356,10 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 }
                 activity_led_decode(ACTIVITY_LED_FRAME);
                 start = get_reference_time();
+                if (!decoded) {
+                    in.first_shown = start;
+                    first_picture = 1;
+                }
                 send_frame(c_image, &frame, &send_us, &ack_wait_us);
                 transfer_us += (get_reference_time() - start) / 100;
 #if APP_XUH_MSC_PLAYER_FRAME_TIMING
@@ -352,6 +379,7 @@ void mpeg_pipeline_decode(chanend c_load, chanend c_image)
                 break;
             }
         }
+        first_picture = 0;
         /* After a failure, release any held chunk and refuse further ones until
          * the loader's stop arrives, so both sides finish the play in step. */
         if (in.held) {
@@ -493,9 +521,8 @@ static void receive_play(chanend c_image, chanend c_render)
         lcd_hash[slot] = hash_bytes(lcd_frames[slot], sizeof(lcd_frames[slot]));
 #endif
         /* YUV is now fully consumed. Release the decoder before waiting for LCD;
-         * the next send will backpressure until this RGB slot is published.
-         * Sequence zero retains its first-display-complete handshake below. */
-        if (sequence) pipeline_send(c_image, &sequence, 1);
+         * the next send will backpressure until this RGB slot is published. */
+        pipeline_send(c_image, &sequence, 1);
         /* The alternate framebuffer was rendered while this one was filled.
          * Receive completion before publishing the next renderer request. */
         if (pending) {
@@ -507,12 +534,6 @@ static void receive_play(chanend c_image, chanend c_render)
         unsigned ready[2] = {slot, sequence};
         pipeline_send(c_render, ready, 2);
         pending = 1;
-        if (!sequence) {
-            pipeline_receive(c_render, ack, 3);
-            record_render(stats, ack, sequence);
-            pending = 0;
-            pipeline_send(c_image, &sequence, 1);
-        }
     }
     if (pending) {
         pipeline_receive(c_render, ack, 3);
