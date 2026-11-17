@@ -272,7 +272,7 @@ The XU316/LCD build provides three configurations:
      - MPEG-1 elementary video, I/P/B pictures
    * - ``mpeg1_audio``
      - ``VIDEO_320x180.MPG``
-     - MPEG-1 program-stream video; decode and discard MP2 audio
+     - MPEG-1 program-stream video with 48-kHz MP2 output through the optional I2S DAC
 
 Each executable contains only its selected video decoder. Build one
 configuration with ``xmake -C build-video mpeg1`` and run it with::
@@ -322,6 +322,10 @@ benchmark configuration:
    * - ``APP_XUH_MSC_PLAYER_AUDIO_DECODE``
      - ``ON``
      - In ``mpeg1_audio``, decode MP2; ``OFF`` measures demux/I/O only
+   * - ``APP_XUH_MSC_PLAYER_AUDIO_DAC``
+     - ``ON``
+     - In ``mpeg1_audio``, play the decoded audio through an I2S DAC on J3;
+       ``OFF`` paces playback with the stand-in
    * - ``APP_XUH_MSC_PLAYER_AUDIO_METER``
      - ``ON``
      - In ``mpeg1_audio``, draw a stereo level meter for the decoded audio
@@ -445,24 +449,31 @@ the screen on a 48-dB logarithmic scale, 11 pixels for each halving of the peak
 level: green when quiet, through amber, to red at full scale. Each bar rises
 at once, falls two pixels a frame and carries a white peak-hold tick. The audio
 task publishes the peak of each decoded MP2 block to the display task, on the
-same tile, without a channel. There is no physical audio output: the meter shows
+same tile, without a channel. The meter shows
 the level of the audio most recently decoded by the timed audio task.
 With S32 PCM the peak scan and logarithmic meter scale use integer arithmetic;
 there is no per-sample conversion to float.
 
 Between the two meters, the ``DEC`` gauge occupies (110, 4) through (209, 29),
 ending on the row above a 180-row picture.
-It estimates **audio lead**, not lip-sync: the audio position minus the
-end-of-frame media position of the picture just transferred to the LCD. In a
-paced build the audio position is the audio played on the timed output clock;
-in an unpaced build it is the audio decoded.
+In a paced build it shows how far the audio is ahead of the picture: the audio
+played, less the start time of the picture whose transfer to the LCD has just
+finished, both on the stream's timeline. Zero means the picture reached the
+display as its audio played. In an unpaced build it shows decode lead instead:
+the audio decoded, less the end time of that picture.
 Positive milliseconds mean audio is ahead (right of centre); negative
-mean it is behind (left). The bar spans -1000 to +1000 ms and clamps at the ends;
-the signed numeric reading continues to 9999 ms, with ``>`` marking larger
-magnitudes. Colours indicate magnitude: green through 40 ms, amber through
-100 ms, then red. These are diagnostic bands, not lip-sync tolerances.
+mean it is behind (left). In a paced build the bar spans -60 to +60 ms, and
+is green through 15 ms either way, amber through 45 ms, then red; marks under
+the bar show where the colour changes. In an unpaced
+build it spans -1000 to +1000 ms, green through 40 ms and amber through 100 ms.
+The bar clamps at its ends; the signed numeric reading continues to 9999 ms,
+with ``>`` marking larger magnitudes. A second tick, in its band's colour, stays
+at the largest reading of the last 50 pictures. The end-of-play summary counts
+the readings in each band.
 Its third line shows ``U:003 H:00120MS``: cumulative confirmed underflow episodes
-and time holding the last stereo sample pair. ``>`` replaces ``:`` when a value
+and missing-audio duration. During that duration the DAC outputs silence; the
+stand-in models holding the last stereo sample pair. The ``H`` label
+is shared by both paths. ``>`` replaces ``:`` when a value
 exceeds the display's three/five digits; terminal reports retain full values.
 Unpaced builds retain the original 100 x 22 rectangle, without the footer or its
 extra SPI transfer, for maximum-throughput comparisons.
@@ -471,11 +482,14 @@ Audio duration comes from played (paced) or decoded (unpaced) samples and their
 sample rate. Video duration
 uses the exact sequence-header frame-rate rational, including 24000/1001 and
 30000/1001; sub-millisecond remainders are retained rather than rounded each
-frame or block. Both positions refer to the end of their block/frame and assume
-aligned stream starts for this gauge. The separate pacing clock uses PES start
-timestamps; the gauge itself does not correct for those offsets.
-This is neither audio playback timing nor the panel's physical scanout timing.
-The unsmoothed value intentionally exposes demux bursts and buffering.
+frame or block. In a paced build the audio position includes the difference
+between the stream's first audio and video timestamps, as the pacing clock does.
+The DAC task polls audio position at 5-ms intervals. The stand-in updates at
+audio block deadlines (24 ms at 48 kHz), on input, and every 10 ms while waiting
+without a playing block. These are event-loop intervals, not hard refresh
+guarantees: decoding and channel handling can delay publication. The reading is
+taken as the last row is written, about 22 ms after the first; the panel's own scan-out and
+the DAC's delay are not included. The value is not smoothed.
 
 The LCD task samples audio progress after each picture's SPI transfer and draws
 the gauge from a separate 5200-byte buffer (4400 bytes in unpaced builds),
@@ -497,8 +511,9 @@ independent of the target rate.
 
 The program-stream player supports MPEG-1 pack/PES headers, video stream 0xe0
 and MP2 audio stream 0xc0. It skips other packet types and rejects MPEG-2 pack
-headers. MP2 PCM is decoded on tile 1 and discarded; there is no physical audio
-output. By default the audio task consumes blocks at their sample rate as a
+headers. MP2 PCM is decoded on tile 1 and, by default, played through an I2S
+DAC (see `DAC output`_). With ``APP_XUH_MSC_PLAYER_AUDIO_DAC=OFF`` it is
+discarded: the audio task consumes blocks at their sample rate as a
 stand-in for playback. Video is paced against this clock, using the initial PES
 timestamps to relate the stream starts. This is an experimental timing path,
 not a measurement of audible lip-sync or physical LCD scanout. One audio block
@@ -510,12 +525,36 @@ samples whose presentation time has not passed are modelled as output. This is
 not physical I2S or click suppression; a long hold would be DC on a real output.
 
 Underflows count episodes, not missing blocks. Consecutive completely late
-blocks belong to the same episode; a usable suffix ends it. Counts and held
-duration are confirmed as subsequent audio is decoded, rather than counting a
+blocks belong to the same episode; a usable suffix ends it. Counts and missing-audio
+duration are confirmed as subsequent audio becomes available, rather than counting a
 provisional tail beyond the last frame. This excludes startup and normal EOF
 without parsing MP2 headers twice. End of input drains remaining audio at its
-sample rate. ``MP2 underflows`` reports count, held samples/channel and ms,
-dropped samples/channel, and the strict-mode setting at end of play.
+sample rate. ``MP2 underflows`` reports count, missing samples/channel and ms,
+dropped samples/channel, and the strict-mode setting at end of play. The report
+keys ``held_samples/channel`` and ``held_ms`` are retained for compatibility;
+they count DAC silence or stand-in hold, not a shared concealment policy.
+
+DAC output
+~~~~~~~~~~
+
+By default ``mpeg1_audio`` plays the audio through an I2S DAC SHIM fitted
+directly on J3; ``-DAPP_XUH_MSC_PLAYER_AUDIO_DAC=OFF`` selects the stand-in. The xcore is the I2S master: BCLK on ``X1D39``, LRCLK on
+``X1D35`` and data on ``X1D24``, 32-bit slots, with a 24.576-MHz master clock
+from the application PLL taken internally on port 1D. Only 48-kHz audio is
+played; another rate is reported as an audio error. There is no sample-rate
+conversion and no volume control.
+
+The I2S task and the MP2 task share tile 1 and a 1024-frame PCM queue. The I2S
+callback takes one frame from the queue each sample period and never waits. It
+starts once 512 frames are queued, and from then on its count of frames played
+is the audio clock that video is paced against. The MP2 task keeps one decoded
+block, in the decoder's own memory, until the queue has taken all of it.
+
+If the queue runs empty the DAC plays silence and the clock keeps running. PCM
+that arrives after its time is dropped. The underflow count, the missing
+duration and strict mode work as for the stand-in. At the end of a play the
+queued audio is played out before the statistics are returned, and the summary
+line reads ``MP2 I2S output``.
 
 While waiting for a picture deadline, the decoder accepts video without blocking
 on the next storage read. The player's ``src/video_config.h`` sets
@@ -784,8 +823,9 @@ commands above to make your own. The demux checks belong to this application
 and do not build or depend on the MPEG decoder.
 
 The finite ``tests/app_audio_pipeline`` fixture runs the actual MP2 channel task
-on tile 0 with a tile-1 producer. Ten cases cover partial-word and multi-chunk
-sends, deterministic replay, decode bypass, empty/truncated/malformed input,
+on tile 1 with a tile-0 producer, as in the player. Its default stand-in build
+has ten cases covering partial-word and multi-chunk sends, deterministic replay,
+decode bypass, empty/truncated/malformed input,
 draining after a latched error and restart, deliberate starvation with a
 continuing clock, partial-frame late-PCM discard, and EOF without false underflow.
 Configure a second build with ``-DTEST_AUDIO_STRICT=ON`` to verify strict failure
@@ -801,6 +841,34 @@ marker::
       --xe build-audio-pipeline/bin/test_audio_pipeline.xe \
       --work build-audio-pipeline/fixtures --adapter-id SERIAL --timeout 60
 
+For the DAC branch, configure ``-DTEST_AUDIO_DAC=ON`` and pass ``--dac`` to the
+same runner::
+
+    cmake -G "Unix Makefiles" -S examples/app_xuh_msc_player/tests/app_audio_pipeline \
+      -B build-audio-dac -DTEST_AUDIO_DAC=ON
+    xmake -C build-audio-dac -j 8
+    python examples/app_xuh_msc_player/tests/run_audio_pipeline.py \
+      --xe build-audio-dac/bin/test_audio_pipeline.xe --dac \
+      --work build-audio-dac/fixtures --adapter-id SERIAL --timeout 60
+
+Repeat in a separate build directory with ``-DTEST_AUDIO_STRICT=ON`` to check
+strict underflow failure and recovery. ``TEST_AUDIO_DAC`` requires the default
+S32 sample format. Eight cases exercise the real DAC audio-task branch,
+``audio_dac_queue.c`` and ``audio_pcm.c``. A tile-1 timer calls the actual
+``audio_dac_next()`` at 48 kHz in place of the I2S/PLL adapter. The checks cover
+silent startup, complete queued-PCM drain before STOP returns, every stereo
+pair's rolling hash against an independent tile-0 decode, fragmented replay,
+bypass, empty/truncated/malformed input, silence with a continuing clock during
+starvation, confirmed underflow accounting, strict-error silencing and clean
+restart. An idle tail before STOP must not count as an underflow. A three-second
+target watchdog and the runner's cycle/host-time bounds make deadlock a failure.
+The runner requires the selected fixture's own completion marker; a stand-in
+pass does not count as a DAC pass.
+
+This is queue/task integration coverage, not validation of ``audio_dac.xc``,
+``lib_i2s``, PLL startup, pins or physical sample timing. Those still require a
+separate hardware playback check with the actual DAC.
+
 Hardware pipeline runners use ``Pyxrun`` from ``test_support`` for
 deadlines, process cleanup and retained logs. Hardware pass criteria use
 stdout only, not diagnostic stderr. Reserve the selected board externally and
@@ -815,8 +883,8 @@ XL1 xSCOPE wiring. ``APP_HW_TARGET`` remains configurable for other boards. The
 explicit target option above also updates build directories cached with the old
 stock XL0 target; use a fresh build directory or reconfigure with that option.
 Omit ``--adapter-id`` to simulate with cycle and host-time bounds. This fixture
-uses JTAG host-file I/O, not USB or a physical audio interface, and is not a
-throughput benchmark. Paced waits make simulation slow; prefer the finite
+uses host-file I/O (full xSCOPE on hardware), not USB or a physical audio
+interface, and is not a throughput benchmark. Paced waits make simulation slow; prefer the finite
 hardware fixture when the simulator reaches its host-time bound.
 
 ``examples/app_xuh_msc_player/tests/sim`` holds simulator tests run by pytest
@@ -829,8 +897,10 @@ written to a generated header; ``--seed`` reproduces a run::
       -B examples/app_xuh_msc_player/tests/sim/build
     python -m pytest examples/app_xuh_msc_player/tests/sim -v
 
-MPEG decoder accuracy, MP2 arithmetic/PCM reference checks and player benchmark
-runners belong to ``lib_mpeg``. With that library's Python venv
+MPEG decoder accuracy, MP2 arithmetic/PCM reference checks and standalone codec
+benchmarks belong to ``lib_mpeg``. Player report parsing and end-to-end playback
+runners belong to this application's ``tests`` directory and its native suite.
+With the decoder library's Python venv
 active, run its native validation suite from this repository's root::
 
     cmake -S ../lib_mpeg/tests -B ../lib_mpeg/build-native-validation \
@@ -840,7 +910,7 @@ active, run its native validation suite from this repository's root::
 
 Omit the reference-file option for generated fixtures only. The suite checks
 video against pristine PL_MPEG and FFmpeg, elementary MP2 PCM precision and
-replay, and completed-report parsing. It has no dependency on this application.
+replay. It has no dependency on this application.
 An optional full MP2 elementary file can be supplied with ``MPEG_TEST_AUDIO_STREAM``;
 program streams must first be demultiplexed outside the codec tests.
 The default transform changes rounding: it is not byte-identical to the original
@@ -852,7 +922,7 @@ For a matched hardware IDCT comparison, build the application once with
 ``MPEG_VIDEO_IDCT_PLMPEG`` selected in ``mpeg_conf.h`` and once with the default
 VPU transform, keeping separate build directories, then run::
 
-    python ../lib_mpeg/tests/usb_lcd/compare_mpeg_idct.py \
+    python examples/app_xuh_msc_player/tests/compare_mpeg_idct.py \
       --original build-original/bin/mpeg1/app_xuh_msc_player_mpeg1.xe \
       --vpu build-vpu/bin/mpeg1/app_xuh_msc_player_mpeg1.xe \
       --adapter-id SERIAL --stream examples/app_xuh_msc_player/data/VIDEO.M1V \
@@ -863,8 +933,20 @@ preserves raw logs and executable/input hashes, and compares plays after startup
 The local input hash is recorded; the on-device file is checked by byte count,
 not by a cryptographic hash. Both builds must use the same source state and
 settings apart from the selected IDCT. Add ``--timing`` when both builds enable
-the histograms. For the audio-enabled player's bounded hardware smoke check, use
-``lib_mpeg/tests/usb_lcd/run_hardware.py --help``.
+the histograms. For the audio-enabled player's bounded hardware smoke check::
+
+    python examples/app_xuh_msc_player/tests/run_hardware.py \
+      build/bin/mpeg1_audio/app_xuh_msc_player_mpeg1_audio.xe \
+      --adapter-id SERIAL --plays 1 --frames 3026 --audio \
+      --audio-checksum 6dd94600 --timeout 260 --work build-player-smoke
+
+This checks I2S-output or decode/discard reports, complete frame/audio counts,
+the selected PCM checksum and arena cleanup, retaining logs and a JSON report.
+Use ``--underflows N`` to require an exact underflow count; without it the
+observed count is recorded, not assumed to be zero. The matching input must
+already be on the USB stick. Neither runner writes flash or USB media. Use
+xSCOPE for player output rather than JTAG logging, and reserve the board until
+the runner's cleanup completes. See ``run_hardware.py --help`` for options.
 
 The finite ``tests/app_mpeg_pipeline`` fixture exercises the actual decoder,
 cross-tile transfer and receiver with host-file input and a checksum renderer.

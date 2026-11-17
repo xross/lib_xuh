@@ -71,7 +71,8 @@ Known issues
   (`#15 <https://github.com/xross/lib_xuh/issues/15>`__)
   and requires 512-byte blocks
   (`#16 <https://github.com/xross/lib_xuh/issues/16>`__).
-* The player has no physical audio output. Experimental audio-clock pacing uses
+* The player's audio output is an optional I2S DAC and plays 48-kHz audio only;
+  there is no sample-rate conversion. Experimental audio-clock pacing uses
   a 400-KiB video arena by default. Insufficient read-ahead can cause audio
   underflows, reported on screen and at end of play; optional strict test builds
   fail on underflow instead of continuing
@@ -102,7 +103,8 @@ Required libraries (dependencies)
 The library depends on ``lib_xud``. ``lib_fatfs`` is needed only by applications
 that set ``XUH_MSC_FATFS``, as both examples do. The video player also uses
 ``lib_logging``, plus ``lib_jpeg``, ``lib_mpeg`` and ``lib_spi``
-for its selected playback configuration. Versions are pinned in
+for its selected playback configuration; DAC output adds ``lib_i2s`` and
+``lib_sw_pll``. Versions are pinned in
 ``lib_xuh/lib_build_info.cmake`` and ``examples/deps.cmake``.
 
 *************************
