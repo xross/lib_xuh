@@ -36,7 +36,7 @@ class HardwareRunnerTests(unittest.TestCase):
 
             args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", str(work),
                     "--adapter-id", "SERIAL", "--timeout", "45"]
-            modules = pyxrun(calls, "PASS: audio pipeline 8 cases; checked\n")
+            modules = pyxrun(calls, "PASS: audio pipeline 10 cases; checked\n")
             with patch.object(sys, "argv", args), patch.object(audio.subprocess, "run", ffmpeg), \
                     patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
                 audio.main()
@@ -44,7 +44,7 @@ class HardwareRunnerTests(unittest.TestCase):
                                       "log_path": work.resolve() / "run.log", "timeout": 45}])
 
     def test_audio_rejects_failure_or_pass_marker_only_on_stderr(self):
-        for success, stderr in ((False, ""), (True, "PASS: audio pipeline 8 cases; checked\n")):
+        for success, stderr in ((False, ""), (True, "PASS: audio pipeline 10 cases; checked\n")):
             with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:
                 work = Path(directory)
 
@@ -57,6 +57,21 @@ class HardwareRunnerTests(unittest.TestCase):
                         patch.dict(sys.modules, pyxrun([], "", stderr=stderr, success=success)), \
                         self.assertRaises(SystemExit):
                     audio.main()
+
+    def test_audio_simulation_timeout_keeps_partial_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            def run(command, **options):
+                if command[0] == "ffmpeg":
+                    (work / "short.mp2").write_bytes(bytes(1728))
+                    return
+                raise audio.subprocess.TimeoutExpired(command, 1, output=b"audio case 0\n",
+                                                       stderr=b"simulation diagnostic\n")
+            args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", directory, "--timeout", "1"]
+            with patch.object(sys, "argv", args), patch.object(audio.subprocess, "run", run), \
+                    redirect_stdout(io.StringIO()), self.assertRaisesRegex(SystemExit, "exceeded"):
+                audio.main()
+            self.assertEqual((work / "run.log").read_text(), "audio case 0\nsimulation diagnostic\n")
 
     def test_video_uses_full_xscope_and_preserves_explicit_legacy_mode(self):
         output = "\n".join(

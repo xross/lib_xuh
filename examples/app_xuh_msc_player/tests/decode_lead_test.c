@@ -7,7 +7,8 @@
 static unsigned char storage[DECODE_LEAD_WIDTH * DECODE_LEAD_HEIGHT * 2 + 32];
 #define PIXELS (storage + 16)
 enum { TRACK = 0x18c3, WHITE = 0xffff, LABEL = 0xd6ba,
-       CENTRE = 50, BAR_LEFT = 5, BAR_RIGHT = 95, TEXT_X = 14 };
+       CENTRE = 50, BAR_LEFT = 5, BAR_RIGHT = 95, TEXT_X = 14,
+       BAR_Y = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 12 : 15, FOOTER_Y = 17 };
 
 static unsigned pixel(unsigned x, unsigned y)
 {
@@ -54,6 +55,13 @@ static void check_publication(void)
     unsigned ms;
     decode_lead_publish(0, 0);
     assert(!decode_lead_read(&ms));
+    unsigned count, held_ms;
+    decode_lead_underflows_publish(3, 120);
+    decode_lead_underflows_read(&count, &held_ms);
+    assert(count == 3 && held_ms == 120);
+    decode_lead_underflows_publish(0, 0);
+    decode_lead_underflows_read(&count, &held_ms);
+    assert(count == 0 && held_ms == 0);
     decode_lead_publish(0, 1);
     assert(decode_lead_read(&ms) && ms == 0); /* Valid zero is not unavailable. */
     decode_lead_publish(72, 1);
@@ -75,24 +83,24 @@ static void check_drawing(void)
     memset(storage, 0x55, sizeof(storage));
     decode_lead_publish(0, 0);
     decode_lead_draw(PIXELS, 40);
-    assert(pixel(CENTRE, 15) == LABEL);
-    assert(pixel(BAR_LEFT, 15) == TRACK && pixel(BAR_RIGHT, 15) == TRACK);
+    assert(pixel(CENTRE, BAR_Y) == LABEL);
+    assert(pixel(BAR_LEFT, BAR_Y) == TRACK && pixel(BAR_RIGHT, BAR_Y) == TRACK);
     guards();
 
     decode_lead_publish(DECODE_LEAD_RANGE_MS, 1);
     decode_lead_draw(PIXELS, DECODE_LEAD_RANGE_MS);
-    assert(pixel(CENTRE, 15) == WHITE);
+    assert(pixel(CENTRE, BAR_Y) == WHITE);
     /* Plus glyph's vertical stroke; absent in the minus glyph. */
     assert(pixel(TEXT_X + 4 * 6 + 2, 3) == LABEL);
     decode_lead_draw(PIXELS, 2 * DECODE_LEAD_RANGE_MS);
-    assert(pixel(BAR_LEFT, 15) == WHITE && pixel(BAR_RIGHT, 15) == TRACK);
+    assert(pixel(BAR_LEFT, BAR_Y) == WHITE && pixel(BAR_RIGHT, BAR_Y) == TRACK);
     assert(pixel(TEXT_X + 4 * 6 + 2, 3) != LABEL);
     decode_lead_draw(PIXELS, 0);
-    assert(pixel(BAR_RIGHT, 15) == WHITE && pixel(BAR_LEFT, 15) == TRACK);
+    assert(pixel(BAR_RIGHT, BAR_Y) == WHITE && pixel(BAR_LEFT, BAR_Y) == TRACK);
     decode_lead_draw(PIXELS, DECODE_LEAD_RANGE_MS / 2);
-    assert(pixel(CENTRE + 22, 15) == WHITE); /* Positive is to the right. */
+    assert(pixel(CENTRE + 22, BAR_Y) == WHITE); /* Positive is to the right. */
     decode_lead_draw(PIXELS, DECODE_LEAD_RANGE_MS + DECODE_LEAD_RANGE_MS / 2);
-    assert(pixel(CENTRE - 22, 15) == WHITE);
+    assert(pixel(CENTRE - 22, BAR_Y) == WHITE);
     unsigned magnitudes[] = {40, 41, 100, 101};
     unsigned colors[] = {(10u << 11) | (43u << 5) | 10u,
                          (26u << 11) | (39u << 5) | 7u,
@@ -101,20 +109,37 @@ static void check_drawing(void)
     for (unsigned i = 0; i < 4; ++i) {
         decode_lead_draw(PIXELS, DECODE_LEAD_RANGE_MS - magnitudes[i]);
         unsigned offset = magnitudes[i] * (BAR_RIGHT - CENTRE) / DECODE_LEAD_RANGE_MS;
-        assert(pixel(CENTRE + offset, 15) == WHITE);
+        assert(pixel(CENTRE + offset, BAR_Y) == WHITE);
         /* At small offsets the centre and position ticks cover all the fill. */
-        if (offset > 1) assert(pixel(CENTRE + 1, 15) == colors[i]);
+        if (offset > 1) assert(pixel(CENTRE + 1, BAR_Y) == colors[i]);
     }
     for (unsigned i = 0; i < 2; ++i) {
         decode_lead_publish(i ? 20000 : 0, 1);
         decode_lead_draw(PIXELS, i ? 0 : 20000);
-        assert(pixel(i ? BAR_RIGHT : BAR_LEFT, 15) == WHITE);
+        assert(pixel(i ? BAR_RIGHT : BAR_LEFT, BAR_Y) == WHITE);
         /* The explicit > magnitude marker distinguishes overflow from 9999. */
         assert(pixel(TEXT_X + 5 * 6, 2) == LABEL);
         guards();
     }
     assert(DECODE_LEAD_X > 107 && DECODE_LEAD_X + DECODE_LEAD_WIDTH <= 212);
-    assert(DECODE_LEAD_Y == 4 && DECODE_LEAD_HEIGHT == 22);
+    assert(DECODE_LEAD_Y == 4);
+#if APP_XUH_MSC_PLAYER_AUDIO_PACED
+    assert(DECODE_LEAD_HEIGHT == 26);
+    /* The gauge must end above a 180-row picture centred on 240 rows. */
+    assert(DECODE_LEAD_Y + DECODE_LEAD_HEIGHT <= (240 - 180) / 2);
+    decode_lead_underflows_publish(3, 120);
+    decode_lead_draw(PIXELS, 0);
+    /* U and H have outer strokes; normal colon has a central stroke. */
+    assert(pixel(5, FOOTER_Y) != 0x0841);
+    assert(pixel(5 + 6 * 6, FOOTER_Y) != 0x0841);
+    decode_lead_underflows_publish(1000, 100000);
+    decode_lead_draw(PIXELS, 0);
+    assert(pixel(5 + 6, FOOTER_Y) == (unsigned)((26u << 11) | (39u << 5) | 7u));
+    assert(pixel(5 + 7 * 6, FOOTER_Y) == (unsigned)((26u << 11) | (39u << 5) | 7u));
+#else
+    assert(DECODE_LEAD_HEIGHT == 22);
+#endif
+    guards();
 }
 #endif
 

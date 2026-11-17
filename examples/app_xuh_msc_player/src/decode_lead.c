@@ -1,11 +1,14 @@
 #include "decode_lead.h"
 
 #if DECODE_LEAD_ENABLED
+#include <stdio.h>
 enum { VALID = 0x80000000u, TIME_MASK = 0x7fffffffu,
        GLYPH_WIDTH = 5, GLYPH_HEIGHT = 7, CELL = 6, TEXT_LENGTH = 12,
-       SPACE = 10, D, E, C, PLUS, MINUS, GREATER, M, S,
+        SPACE = 10, D, E, C, PLUS, MINUS, GREATER, M, S, U, H, COLON,
        TEXT_X = (DECODE_LEAD_WIDTH - TEXT_LENGTH * CELL) / 2,
-       BAR_X = 5, BAR_Y = 15, BAR_HALF = 45, CENTRE = BAR_X + BAR_HALF,
+       BAR_X = 5, BAR_HALF = 45, CENTRE = BAR_X + BAR_HALF,
+       /* With the footer, the bar moves up three rows to make room for it. */
+       BAR_Y = APP_XUH_MSC_PLAYER_AUDIO_PACED ? 12 : 15, FOOTER_Y = 17,
        BACKGROUND = 0x0841, BORDER = 0x4208, TRACK = 0x18c3, LABEL = 0xd6ba,
        GREEN = (10u << 11) | (43u << 5) | 10u,
        AMBER = (26u << 11) | (39u << 5) | 7u,
@@ -14,6 +17,10 @@ enum { VALID = 0x80000000u, TIME_MASK = 0x7fffffffu,
 /* Same single-word, tile-local publication as the stereo peak meter. No
  * multiword snapshot, retry loop, channel traffic or waiting in either task. */
 static volatile unsigned published;
+static volatile unsigned published_underflows, published_held_ms;
+
+/* LCD task only: the leads drawn since the last report. */
+static struct { long long sum; int least, greatest; unsigned count, late, near, early; } summary;
 
 static const unsigned char glyphs[][GLYPH_HEIGHT] = {
     {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e}, {0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e},
@@ -30,6 +37,9 @@ static const unsigned char glyphs[][GLYPH_HEIGHT] = {
     {0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10}, /* > */
     {0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11}, /* M */
     {0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e}, /* S */
+    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e}, /* U */
+    {0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11}, /* H */
+    {0, 0x04, 0x04, 0, 0x04, 0x04, 0},         /* : */
 };
 
 void decode_lead_advance(decode_lead_clock_t *state, unsigned units, unsigned rate)
@@ -51,6 +61,18 @@ unsigned decode_lead_read(unsigned *ms)
     unsigned snapshot = published;
     *ms = snapshot & TIME_MASK;
     return (snapshot & VALID) != 0;
+}
+
+void decode_lead_underflows_publish(unsigned count, unsigned held_ms)
+{
+    published_held_ms = held_ms;
+    published_underflows = count;
+}
+
+void decode_lead_underflows_read(unsigned *count, unsigned *held_ms)
+{
+    *count = published_underflows;
+    *held_ms = published_held_ms;
 }
 
 int decode_lead_difference(unsigned audio_ms, unsigned video_ms)
@@ -86,6 +108,13 @@ void decode_lead_draw(unsigned char *pixels, unsigned video_ms)
     if (!valid) {
         text[4] = text[5] = SPACE;
         text[6] = text[7] = text[8] = text[9] = MINUS;
+    } else {
+        if (!summary.count || delta < summary.least) summary.least = delta;
+        if (!summary.count || delta > summary.greatest) summary.greatest = delta;
+        summary.sum += delta;
+        ++summary.count;
+        /* Beyond 100 ms either way is easily noticed as out of step. */
+        if (delta < -100) ++summary.late; else if (delta > 100) ++summary.early; else ++summary.near;
     }
 
     fill(pixels, 0, 0, DECODE_LEAD_WIDTH, DECODE_LEAD_HEIGHT, BACKGROUND);
@@ -111,5 +140,34 @@ void decode_lead_draw(unsigned char *pixels, unsigned video_ms)
         fill(pixels, CENTRE, BAR_Y - 2, 1, 6, LABEL);
         fill(pixels, position, BAR_Y - 2, 1, 6, 0xffff);
     }
+#if APP_XUH_MSC_PLAYER_AUDIO_PACED
+    /* Fifteen cells fit inside the 100-pixel rectangle. Overflow is explicit,
+     * while terminal reports retain the full values: U:003 H:00120MS. */
+    unsigned underflows, held_ms;
+    decode_lead_underflows_read(&underflows, &held_ms);
+    unsigned count = underflows > 999 ? 999 : underflows;
+    unsigned held = held_ms > 99999 ? 99999 : held_ms;
+    unsigned char footer[] = {U, underflows > 999 ? GREATER : COLON,
+        count / 100, count / 10 % 10, count % 10, SPACE,
+        H, held_ms > 99999 ? GREATER : COLON,
+        held / 10000, held / 1000 % 10, held / 100 % 10, held / 10 % 10, held % 10, M, S};
+    for (unsigned character = 0; character < sizeof(footer); ++character)
+        for (unsigned y = 0; y < GLYPH_HEIGHT; ++y)
+            for (unsigned x = 0; x < GLYPH_WIDTH; ++x)
+                if ((glyphs[footer[character]][y] >> (GLYPH_WIDTH - 1 - x)) & 1)
+                    fill(pixels, 5 + character * CELL + x, FOOTER_Y + y, 1, 1,
+                         underflows ? AMBER : LABEL);
+#endif
+}
+
+void decode_lead_report(void)
+{
+    if (summary.count)
+        printf("Audio decode lead: mean=%d min=%d max=%d ms over %u pictures; "
+               "late=%u within-100ms=%u early=%u\n",
+               (int)(summary.sum / (long long)summary.count), summary.least, summary.greatest,
+               summary.count, summary.late, summary.near, summary.early);
+    summary.sum = 0;
+    summary.count = summary.late = summary.near = summary.early = 0;
 }
 #endif

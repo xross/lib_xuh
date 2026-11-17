@@ -13,6 +13,10 @@ set(APP_COMPILER_FLAGS -O3 -g -report -mcmodel=large -mno-dual-issue
     -DAPP_XUH_MSC_PLAYER_AUDIO_METER=0)
 # The player's mpeg_conf.h (in ../../src) selects S32; OFF overrides it.
 option(TEST_AUDIO_S32 "Exercise the player's S32 PCM path (OFF tests float)" ON)
+option(TEST_AUDIO_STRICT "Fail the starvation case on confirmed underflow" OFF)
+if(TEST_AUDIO_STRICT)
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_PLAYER_PACING_STRICT=1)
+endif()
 if(NOT TEST_AUDIO_S32)
     list(APPEND APP_COMPILER_FLAGS -DMPEG_AUDIO_FORMAT=0)
 endif()

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xcore/hwtimer.h>
 #include "audio_pipeline.h"
 
 static unsigned char input[4096];
@@ -10,16 +11,56 @@ static void play(chanend channel, unsigned bytes, unsigned fragment, unsigned de
                  unsigned stats[AUDIO_STATS_WORDS])
 {
     assert(audio_pipeline_start(channel, decode) == 0);
+    unsigned clock;
+    assert(!audio_pipeline_clock(&clock));
     /* Zero-byte sends must not produce an empty DATA packet. */
     assert(audio_pipeline_send(channel, input, 0) == 0);
     for (unsigned offset = 0; offset < bytes;) {
         unsigned count = bytes - offset;
         if (count > fragment) count = fragment;
-        assert(audio_pipeline_send(channel, input + offset, count) == 0);
+        /* Malformed streams latch an error but still acknowledge every send. */
+        assert(audio_pipeline_send(channel, input + offset, count) <= 0);
         offset += count;
+        if (decode && input[0] == 0xff && offset >= 576)
+            assert(audio_pipeline_clock(&clock));
     }
     audio_pipeline_stop(channel, stats);
     assert(stats[AUDIO_BYTES] == bytes);
+}
+
+static void starvation(chanend channel, unsigned stats[AUDIO_STATS_WORDS])
+{
+    hwtimer_t timer = hwtimer_alloc();
+    assert(audio_pipeline_start(channel, 1) == 0);
+    assert(audio_pipeline_send(channel, input, 576) == 0);
+    unsigned before, after;
+    assert(audio_pipeline_clock(&before));
+    /* More than two block durations, then complete and partially late frames.
+     * The sender is deliberately idle; no storage or codec fault is involved. */
+    hwtimer_delay(timer, 6000000u);
+    int result = audio_pipeline_send(channel, input + 576, 1152);
+    if (APP_XUH_MSC_PLAYER_PACING_STRICT) {
+        assert(result < 0);
+    } else {
+        assert(result == 0 && audio_pipeline_clock(&after));
+        /* The epoch must not move forward by the 60-ms input gap. Allow the
+         * short round-trip sampling error of clock publication across tiles. */
+        assert((int)(after - before) < 1000000 && (int)(before - after) < 1000000);
+    }
+    audio_pipeline_stop(channel, stats);
+    assert(stats[AUDIO_UNDERFLOWS] == 1 && stats[AUDIO_HELD_SAMPLES] >= 1152);
+    assert(stats[AUDIO_HELD_SAMPLES] == stats[AUDIO_DROPPED_SAMPLES]);
+    assert(stats[AUDIO_ERRORS] == 0);
+    if (!APP_XUH_MSC_PLAYER_PACING_STRICT) assert(stats[AUDIO_BLOCKS] == 3);
+    /* A complete final frame followed by no more input is EOF, not a gap.
+     * This also verifies a clean new play after strict failure. */
+    assert(audio_pipeline_start(channel, 1) == 0);
+    assert(audio_pipeline_send(channel, input, 1728) == 0);
+    hwtimer_delay(timer, 10000000u);
+    audio_pipeline_stop(channel, stats);
+    assert(stats[AUDIO_BLOCKS] == 3 && !stats[AUDIO_ERRORS]);
+    assert(!stats[AUDIO_UNDERFLOWS] && !stats[AUDIO_HELD_SAMPLES]);
+    hwtimer_free(timer);
 }
 
 void test_audio_pipeline(chanend channel)
@@ -40,6 +81,7 @@ void test_audio_pipeline(chanend channel)
         fflush(stdout);
         assert(stats[AUDIO_BLOCKS] == 3 && stats[AUDIO_SAMPLES] == 3456);
         assert(stats[AUDIO_RATE] == 48000 && stats[AUDIO_ERRORS] == 0);
+        assert(!stats[AUDIO_UNDERFLOWS] && !stats[AUDIO_HELD_SAMPLES]);
         assert(stats[AUDIO_PEAK] > 0);
         if (!i) {
             checksum = stats[AUDIO_CHECKSUM];
@@ -62,6 +104,7 @@ void test_audio_pipeline(chanend channel)
     play(channel, bytes, 7, 1, stats);
     assert(stats[AUDIO_BLOCKS] == 3 && stats[AUDIO_ERRORS] == 0);
     assert(stats[AUDIO_CHECKSUM] == checksum && stats[AUDIO_PEAK] == peak);
-    puts("PASS: audio pipeline 8 cases; chunking, decode/bypass, stop/restart and error recovery");
+    starvation(channel, stats);
+    puts("PASS: audio pipeline 10 cases; chunking, bypass/errors, continuous clock, underflow/recovery and EOF");
     exit(0);
 }

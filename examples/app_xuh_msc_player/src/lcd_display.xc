@@ -269,6 +269,9 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
         /* End of a play: the receiver has already drained every frame. */
         if (slot == PIPELINE_STOP) {
             expected = 0;
+#if DECODE_LEAD_ENABLED
+            decode_lead_report();
+#endif
             continue;
         }
         /* Slot and sequence are checked before accessing shared tile-0 RAM. */

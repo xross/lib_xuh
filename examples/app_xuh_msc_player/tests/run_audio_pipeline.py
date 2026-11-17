@@ -38,15 +38,23 @@ def main():
                                 cwd=work, log_path=work / "run.log")
         output = captured.text
     else:
-        command = ["xsim", "--max-cycles", "100000000", "--xscope",
+        command = ["xsim", "--max-cycles", "500000000", "--xscope",
                    f"-offline {work / 'audio-pipeline.vcd'}", str(args.xe.resolve())]
-        result = subprocess.run(command, cwd=work, capture_output=True, text=True, timeout=args.timeout)
+        try:
+            result = subprocess.run(command, cwd=work, capture_output=True, text=True, timeout=args.timeout)
+        except subprocess.TimeoutExpired as error:
+            def text(value):
+                return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+            output = text(error.stdout) + text(error.stderr)
+            (work / "run.log").write_text(output)
+            print(output, end="")
+            raise SystemExit(f"Audio simulation exceeded {args.timeout:g} host seconds; see {work / 'run.log'}")
         output = result.stdout + result.stderr
         (work / "run.log").write_text(output)
         failed = result.returncode != 0
         print(output, end="")
-    if failed or "PASS: audio pipeline 8 cases;" not in output:
-        raise SystemExit("Audio pipeline did not complete all eight cases")
+    if failed or "PASS: audio pipeline 10 cases;" not in output:
+        raise SystemExit("Audio pipeline did not complete all ten cases")
 
 
 if __name__ == "__main__":
