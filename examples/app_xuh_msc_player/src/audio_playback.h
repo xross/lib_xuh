@@ -3,7 +3,8 @@
 #include <stdint.h>
 
 /* Output-clock accounting, independent of MP2 parsing and hardware resources.
- * Call advance at least once per reference-timer wrap (the task uses 10 ms).
+ * Call advance at least once per reference-timer wrap. The stand-in task uses
+ * block deadlines while playing and 10-ms waits otherwise, plus input events.
  * Positions/counts are samples per channel; modulo differences allow streams
  * shorter than half the unsigned sample range. No clock reset on starvation. */
 typedef struct {

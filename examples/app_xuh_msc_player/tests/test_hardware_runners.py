@@ -44,19 +44,42 @@ class HardwareRunnerTests(unittest.TestCase):
                                       "log_path": work.resolve() / "run.log", "timeout": 45}])
 
     def test_audio_rejects_failure_or_pass_marker_only_on_stderr(self):
-        for success, stderr in ((False, ""), (True, "PASS: audio pipeline 10 cases; checked\n")):
-            with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:
-                work = Path(directory)
+        for dac, marker in ((False, "PASS: audio pipeline 10 cases; checked\n"),
+                            (True, "PASS: DAC audio pipeline 8 cases; checked\n")):
+            for success, stderr in ((False, ""), (True, marker)):
+                with self.subTest(dac=dac, success=success), tempfile.TemporaryDirectory() as directory:
+                    work = Path(directory)
 
-                def ffmpeg(*args, **kwargs):
-                    (work / "short.mp2").write_bytes(bytes(1728))
+                    def ffmpeg(*args, **kwargs):
+                        (work / "short.mp2").write_bytes(bytes(1728))
 
-                args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", directory,
-                        "--adapter-id", "SERIAL"]
-                with patch.object(sys, "argv", args), patch.object(audio.subprocess, "run", ffmpeg), \
-                        patch.dict(sys.modules, pyxrun([], "", stderr=stderr, success=success)), \
-                        self.assertRaises(SystemExit):
-                    audio.main()
+                    args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", directory,
+                            "--adapter-id", "SERIAL"] + (["--dac"] if dac else [])
+                    with patch.object(sys, "argv", args), patch.object(audio.subprocess, "run", ffmpeg), \
+                            patch.dict(sys.modules, pyxrun([], "", stderr=stderr, success=success)), \
+                            self.assertRaises(SystemExit):
+                        audio.main()
+
+    def test_audio_dac_requires_its_own_complete_marker(self):
+        for dac in (False, True):
+            for dac_output in (False, True):
+                with self.subTest(dac=dac, dac_output=dac_output), tempfile.TemporaryDirectory() as directory:
+                    work = Path(directory)
+
+                    def ffmpeg(*args, **kwargs):
+                        (work / "short.mp2").write_bytes(bytes(1728))
+
+                    marker = "PASS: DAC audio pipeline 8 cases; checked\n" if dac_output else \
+                        "PASS: audio pipeline 10 cases; checked\n"
+                    args = ["run_audio_pipeline.py", "--xe", "audio.xe", "--work", directory,
+                            "--adapter-id", "SERIAL"] + (["--dac"] if dac else [])
+                    with patch.object(sys, "argv", args), patch.object(audio.subprocess, "run", ffmpeg), \
+                            patch.dict(sys.modules, pyxrun([], marker)), redirect_stdout(io.StringIO()):
+                        if dac == dac_output:
+                            audio.main()
+                        else:
+                            with self.assertRaisesRegex(SystemExit, "selected fixture"):
+                                audio.main()
 
     def test_audio_simulation_timeout_keeps_partial_output(self):
         with tempfile.TemporaryDirectory() as directory:

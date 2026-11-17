@@ -28,6 +28,7 @@ target_compile_definitions(audio_meter_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JP
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1 APP_XUH_MSC_PLAYER_MPEG_AUDIO=1)
 add_executable(frame_timing_test frame_timing_test.c)
 add_executable(audio_playback_test audio_playback_test.c)
+add_executable(audio_pcm_test audio_pcm_test.c ../src/audio_pcm.c)
 add_executable(activity_led_test activity_led_test.c ../src/activity_led.c)
 add_executable(mjpeg_reader_test mjpeg_reader_test.c ../src/mjpeg_reader.c)
 target_include_directories(mjpeg_reader_test PRIVATE "${FATFS_ROOT}/lib_fatfs/api")
@@ -35,7 +36,7 @@ target_compile_definitions(fps_overlay_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JP
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
 target_compile_definitions(video_window_test PRIVATE APP_XUH_MSC_PLAYER_ENABLE_JPEG=0
     APP_XUH_MSC_PLAYER_ENABLE_MPEG1=1)
-foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test audio_meter_test decode_lead_test decode_lead_off_test decode_lead_unpaced_test frame_timing_test audio_playback_test activity_led_test mjpeg_reader_test)
+foreach(target mpeg_ps_reader_test mpeg_ps_demux fps_overlay_test video_window_test audio_meter_test decode_lead_test decode_lead_off_test decode_lead_unpaced_test frame_timing_test audio_playback_test audio_pcm_test activity_led_test mjpeg_reader_test)
     target_include_directories(${target} PRIVATE ../src)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     if(APP_TEST_SANITIZE)

@@ -1,5 +1,6 @@
 #ifndef APP_AUDIO_PIPELINE_H_
 #define APP_AUDIO_PIPELINE_H_
+#include "audio_dac.h"
 
 #ifndef APP_XUH_MSC_PLAYER_MPEG_AUDIO
 #define APP_XUH_MSC_PLAYER_MPEG_AUDIO 0
@@ -8,23 +9,26 @@
 #define APP_XUH_MSC_PLAYER_AUDIO_DECODE 1
 #endif
 
-/* 1: the audio task consumes decoded audio at its sample rate, standing in for
- * an audio output, and the player runs in real time against it. 0: audio is
- * decoded and discarded as it arrives and the player runs at full speed. */
+/* 1: the DAC or timed stand-in consumes decoded audio at its sample rate, and
+ * the player runs in real time against it. 0: audio is decoded and discarded
+ * as it arrives and the player runs at full speed (DAC must be disabled). */
 #ifndef APP_XUH_MSC_PLAYER_AUDIO_PACED
 #define APP_XUH_MSC_PLAYER_AUDIO_PACED 1
 #endif
 
 /* Tests can fail on the first confirmed output underflow. Normal playback
- * continues on the same clock, holding the last pair and discarding late PCM. */
+ * continues on the same clock and discards late PCM. The DAC outputs silence
+ * during a gap; the stand-in models holding the last pair. */
 #ifndef APP_XUH_MSC_PLAYER_PACING_STRICT
 #define APP_XUH_MSC_PLAYER_PACING_STRICT 0
 #endif
 
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
 #include <xccompat.h>
-enum { AUDIO_START = 1, AUDIO_DATA = 2, AUDIO_STOP = 3,
+enum { AUDIO_START = 1, AUDIO_DATA = 2, AUDIO_STOP = 3, AUDIO_OFFSET = 4,
        AUDIO_CHUNK_BYTES = 1024 };
+/* AUDIO_HELD_SAMPLES is the historical name for missing-audio duration:
+ * silence with the DAC, last-pair hold with the stand-in. */
 enum { AUDIO_BYTES, AUDIO_BLOCKS, AUDIO_SAMPLES, AUDIO_RATE, AUDIO_DECODE_US,
        AUDIO_ERRORS, AUDIO_PEAK, AUDIO_CHECKSUM,
        AUDIO_UNDERFLOWS, AUDIO_HELD_SAMPLES, AUDIO_DROPPED_SAMPLES,
@@ -32,6 +36,10 @@ enum { AUDIO_BYTES, AUDIO_BLOCKS, AUDIO_SAMPLES, AUDIO_RATE, AUDIO_DECODE_US,
 void mp2_audio_task(chanend channel);
 #ifndef __XC__
 int audio_pipeline_start(chanend channel, unsigned decode);
+/* Tell the audio task when the stream's audio starts, relative to its first
+ * picture, so the gauge can compare audio and video on one timeline. Optional,
+ * once per play, not acknowledged. */
+void audio_pipeline_offset(chanend channel, int milliseconds);
 /* Each bounded chunk is acknowledged once accepted, including bypass and
  * latched-error paths. When paced, compressed audio waits in the decoder's input
  * buffer and a chunk is accepted only when there is room, so this blocks while

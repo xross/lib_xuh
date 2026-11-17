@@ -92,11 +92,17 @@ PS_READ_CALLBACK static int mpeg_ps_disk_read(void *context, unsigned char *data
     return rc;
 }
 
+static unsigned audio_offset_sent;
+
 static void publish_audio_timing(void)
 {
     unsigned offset;
     int audio_start_ms;
     unsigned have_start = mpeg_ps_audio_start(&mpeg_ps, &audio_start_ms);
+    if (have_start && !audio_offset_sent) {
+        audio_pipeline_offset(mpeg_audio_channel, audio_start_ms);
+        audio_offset_sent = 1;
+    }
     if (have_start && audio_pipeline_clock(&offset))
         mpeg_pipeline_audio_clock(offset - (unsigned)audio_start_ms * 100000u, 1);
     else
@@ -128,6 +134,7 @@ VIDEO_SOURCE_OPEN static int mpeg_source_open(void *context)
     if (!rc) {
         mpeg_ps_init(&mpeg_ps, mpeg_ps_disk_read, &mpeg_file);
         mpeg_pipeline_audio_clock(0, 0);
+        audio_offset_sent = 0;
         if (audio_pipeline_start(mpeg_audio_channel, APP_XUH_MSC_PLAYER_AUDIO_DECODE)) {
             audio_pipeline_stop(mpeg_audio_channel, audio_stats);
             f_close(&mpeg_file);
@@ -188,6 +195,7 @@ static int play_mpeg1(chanend c_load, unsigned number)
     printf("MPEG arena: peak=%u live-after-close=%u bytes\n", stats[MPEG_ARENA_PEAK], stats[MPEG_ARENA_LIVE]);
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
     printf("MP2 %s: bytes=%u blocks=%u samples/channel=%u rate=%u errors=%u arena=%u checksum=%08x\n",
+           APP_XUH_MSC_PLAYER_AUDIO_DAC ? "I2S output" :
            APP_XUH_MSC_PLAYER_AUDIO_DECODE ? "decode/discard" : "demux only",
            audio_stats[AUDIO_BYTES], audio_stats[AUDIO_BLOCKS], audio_stats[AUDIO_SAMPLES],
            audio_stats[AUDIO_RATE], audio_stats[AUDIO_ERRORS], audio_stats[AUDIO_PEAK],

@@ -14,6 +14,15 @@ set(APP_COMPILER_FLAGS -O3 -g -report -mcmodel=large -mno-dual-issue
 # The player's mpeg_conf.h (in ../../src) selects S32; OFF overrides it.
 option(TEST_AUDIO_S32 "Exercise the player's S32 PCM path (OFF tests float)" ON)
 option(TEST_AUDIO_STRICT "Fail the starvation case on confirmed underflow" OFF)
+option(TEST_AUDIO_DAC "Exercise the real DAC branch and queue with a timed callback consumer (no I2S pins)" OFF)
+if(TEST_AUDIO_DAC)
+    if(NOT TEST_AUDIO_S32)
+        message(FATAL_ERROR "TEST_AUDIO_DAC requires TEST_AUDIO_S32")
+    endif()
+    set(APP_C_SRCS src/dac_test.c src/dac_consumer.c ../../src/audio_pipeline.c
+        ../../src/decode_lead.c ../../src/audio_dac_queue.c ../../src/audio_pcm.c)
+    list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_PLAYER_AUDIO_DAC=1)
+endif()
 if(TEST_AUDIO_STRICT)
     list(APPEND APP_COMPILER_FLAGS -DAPP_XUH_MSC_PLAYER_PACING_STRICT=1)
 endif()

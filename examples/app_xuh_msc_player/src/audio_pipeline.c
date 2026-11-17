@@ -8,6 +8,7 @@
 #include "audio_meter.h"
 #include "decode_lead.h"
 #include "audio_playback.h"
+#include "audio_dac_queue.h"
 
 /* The MP2 decoder is lib_mpeg's; this task owns its memory. */
 static unsigned char audio_memory[MPEG_AUDIO_MEMORY_SIZE] __attribute__((aligned(8)));
@@ -29,6 +30,15 @@ int audio_pipeline_start(chanend channel, unsigned decode)
     pipeline_receive(channel, &result, 1);
     return (int)result;
 }
+
+void audio_pipeline_offset(chanend channel, int milliseconds)
+{
+    unsigned message[2] = {AUDIO_OFFSET, (unsigned)milliseconds};
+    pipeline_send(channel, message, 2);
+}
+
+/* Audio task: media time of the first audio sample, from AUDIO_OFFSET. */
+static int media_start_ms;
 
 int audio_pipeline_send(chanend channel, const unsigned char *data, unsigned bytes)
 {
@@ -127,16 +137,180 @@ static mpeg_result_t decode_block(mpeg_audio_frame_t *frame, unsigned stats[AUDI
     return next;
 }
 
+#if !APP_XUH_MSC_PLAYER_AUDIO_DAC
 /* Shadow output of the decode/discard stand-in, not physical I2S. At a block's
  * end retain its last emitted pair until another usable block completes.
  * Volatile keeps this modelled output observable, including while starved. */
 static volatile mpeg_audio_sample_t held_output[2];
+#endif
 
 static unsigned strict_failed(const unsigned stats[AUDIO_STATS_WORDS])
 {
     return APP_XUH_MSC_PLAYER_PACING_STRICT && stats[AUDIO_UNDERFLOWS];
 }
 
+#if APP_XUH_MSC_PLAYER_AUDIO_DAC
+#if MPEG_AUDIO_FORMAT != MPEG_AUDIO_FORMAT_S32 || !APP_XUH_MSC_PLAYER_AUDIO_PACED
+#error Physical I2S output requires paced S32 decoding
+#endif
+
+enum { DAC_POLL_TICKS = AUDIO_REFERENCE_HZ / 200 };
+
+static void dac_progress(unsigned status[DAC_STATUS_WORDS], unsigned stats[AUDIO_STATS_WORDS])
+{
+    audio_dac_status(status);
+    stats[AUDIO_UNDERFLOWS] = status[DAC_UNDERFLOWS];
+    /* The DAC plays silence for missing PCM, and the late PCM is dropped. */
+    stats[AUDIO_HELD_SAMPLES] = stats[AUDIO_DROPPED_SAMPLES] = status[DAC_MISSING];
+    stats[AUDIO_FIRST_UNDERFLOW] = status[DAC_FIRST_UNDERFLOW];
+#if DECODE_LEAD_ENABLED
+    decode_lead_publish((unsigned)((unsigned long long)status[DAC_PLAYED] * 1000 /
+                                  AUDIO_DAC_RATE) + (unsigned)media_start_ms, status[DAC_STARTED]);
+    decode_lead_underflows_publish(status[DAC_UNDERFLOWS],
+        (unsigned)((unsigned long long)status[DAC_MISSING] * 1000 / AUDIO_DAC_RATE));
+#endif
+}
+
+/* Output to the DAC. The I2S callback plays the PCM queue at the sample rate;
+ * this task keeps it fed. One decoded block is held, in the decoder's own
+ * memory, until the queue has taken all of it. Compressed audio waits in the
+ * decoder's input buffer, and a chunk is taken from the sender only when there
+ * is room. The audio clock reported to the sender is the count of frames the
+ * DAC has played. The stack bound is provisional, as for the stand-in. */
+#pragma stackfunction 1024
+void mp2_audio_task(chanend channel)
+{
+    unsigned payload[AUDIO_CHUNK_BYTES / 4];
+    hwtimer_t timer = hwtimer_alloc();
+    if (!timer) __builtin_trap();
+    for (;;) {
+        unsigned header[2], stats[AUDIO_STATS_WORDS] = {0};
+        unsigned status[DAC_STATUS_WORDS] = {0};
+        const mpeg_audio_sample_t *block = NULL;
+        unsigned remaining = 0, need_input = 1, stopping = 0, acknowledge = 0, silenced = 0;
+        pipeline_receive(channel, header, 2);
+        if (header[0] != AUDIO_START) __builtin_trap();
+        media_start_ms = 0;
+        unsigned decode = header[1];
+        audio_dac_reset();
+        unsigned result = decode &&
+            mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
+#if DECODE_LEAD_ENABLED
+        decode_lead_publish(0, 0);
+        decode_lead_underflows_publish(0, 0);
+#endif
+#if AUDIO_METER_ENABLED
+        audio_meter_publish(0, 0);
+#endif
+        pipeline_send(channel, &result, 1);
+        if (result) ++stats[AUDIO_ERRORS];
+        for (;;) {
+            unsigned failed = stats[AUDIO_ERRORS] || strict_failed(stats);
+            unsigned active = decode && !failed;
+            if (active) {
+                if (!remaining && !need_input) {
+                    mpeg_audio_frame_t frame;
+                    mpeg_result_t next = decode_block(&frame, stats);
+                    if (next == MPEG_FRAME) {
+                        output_block(&frame, stats, NULL);
+                        if (frame.sample_rate != AUDIO_DAC_RATE) {
+                            ++stats[AUDIO_ERRORS];  /* No rate conversion. */
+                            continue;
+                        }
+                        block = frame.samples;
+                        remaining = MPEG_AUDIO_FRAME_SAMPLES;
+                    } else {
+                        need_input = 1;
+                        if (next < 0) { ++stats[AUDIO_ERRORS]; continue; }
+                    }
+                }
+                if (remaining) {
+                    unsigned taken = audio_dac_write(block, remaining);
+                    block += 2 * taken;
+                    remaining -= taken;
+                }
+                dac_progress(status, stats);
+                if (strict_failed(stats)) continue;
+                /* Have the next block decoded before the queue needs it. */
+                if (!remaining && !need_input) continue;
+            } else if (failed && !silenced) {
+                audio_dac_reset();
+                remaining = 0;
+                silenced = 1;
+#if DECODE_LEAD_ENABLED
+                decode_lead_publish(0, 0);
+#endif
+            }
+            if (acknowledge) {
+                unsigned live = active && status[DAC_STARTED];
+                unsigned consumed[4] = {AUDIO_DATA,
+                    (unsigned)((unsigned long long)status[DAC_PLAYED] * AUDIO_REFERENCE_HZ /
+                               AUDIO_DAC_RATE), live, failed};
+                pipeline_send(channel, consumed, 4);
+                acknowledge = 0;
+            }
+            if (stopping && (!active || (need_input && !remaining))) break;
+            unsigned accept = !active || mpeg_audio_input_space() >= AUDIO_CHUNK_BYTES;
+            /* A full buffer that yields no block would never drain. */
+            if (!accept && !remaining) { ++stats[AUDIO_ERRORS]; continue; }
+            unsigned timed = active && (remaining || status[DAC_STARTED]);
+            if (timed) hwtimer_set_trigger_time(timer, get_reference_time() + DAC_POLL_TICKS);
+            SELECT_RES_ORDERED(CASE_GUARD_THEN(timer, timed, on_poll),
+                               CASE_GUARD_THEN(channel, accept && !stopping, on_message))
+            {
+            on_message: {
+                unsigned operation = chanend_in_word(channel);
+                unsigned bytes = chanend_in_word(channel);
+                if (operation == AUDIO_STOP) {
+                    chanend_check_control_token(channel, XS1_CT_END);
+                    stopping = 1;
+                    break;
+                }
+                if (operation == AUDIO_OFFSET) {
+                    chanend_check_control_token(channel, XS1_CT_END);
+                    media_start_ms = (int)bytes;
+                    break;
+                }
+                if (operation != AUDIO_DATA || !bytes || bytes > AUDIO_CHUNK_BYTES) __builtin_trap();
+                for (unsigned i = 0; i < (bytes + 3) / 4; ++i)
+                    payload[i] = chanend_in_word(channel);
+                chanend_check_control_token(channel, XS1_CT_END);
+                asm volatile("" ::: "memory");
+                stats[AUDIO_BYTES] += bytes;
+                if (active) {
+                    if (mpeg_audio_feed((const unsigned char *)payload, bytes) < 0) ++stats[AUDIO_ERRORS];
+                    else need_input = 0;
+                }
+                acknowledge = 1;
+                break;
+            }
+            on_poll: {
+                (void)hwtimer_get_time(timer);      /* Clears the event. */
+                break;
+            }
+            }
+        }
+        hwtimer_clear_trigger_time(timer);
+        if (!silenced) {
+            audio_dac_finish();
+            dac_progress(status, stats);
+        }
+        if (decode) {
+            if (!strict_failed(stats) &&
+                (mpeg_audio_finish() != MPEG_END || !stats[AUDIO_BLOCKS])) ++stats[AUDIO_ERRORS];
+            stats[AUDIO_PEAK] = (unsigned)mpeg_audio_memory_stats().peak;
+            mpeg_audio_close();
+        }
+#if DECODE_LEAD_ENABLED
+        if (stats[AUDIO_ERRORS] || strict_failed(stats)) decode_lead_publish(0, 0);
+#endif
+#if AUDIO_METER_ENABLED
+        audio_meter_publish(0, 0);
+#endif
+        pipeline_send(channel, stats, AUDIO_STATS_WORDS);
+    }
+}
+#else
 /* PL_MPEG's unused indirect callbacks prevent complete automatic stack sizing.
  * This provisional bound includes the 1-KiB payload and synthesis scratch.
  *
@@ -161,6 +335,7 @@ void mp2_audio_task(chanend channel)
         held_output[0] = held_output[1] = 0;
         pipeline_receive(channel, header, 2);
         if (header[0] != AUDIO_START) __builtin_trap();
+        media_start_ms = 0;
         unsigned decode = header[1], result = decode &&
             mpeg_audio_open(audio_memory, sizeof(audio_memory)) != MPEG_NEED_INPUT;
         unsigned paced = APP_XUH_MSC_PLAYER_AUDIO_PACED && decode;
@@ -184,7 +359,7 @@ void mp2_audio_task(chanend channel)
                  * position would read up to two blocks early. */
                 if (playback.started)
                     decode_lead_publish((unsigned)((unsigned long long)playback.played * 1000 /
-                                                   playback.rate), 1);
+                                                   playback.rate) + (unsigned)media_start_ms, 1);
 #endif
                 if (playing && (int)(now - due) >= 0) {
                     held_output[0] = tail[0];
@@ -269,6 +444,11 @@ void mp2_audio_task(chanend channel)
                     stopping = 1;
                     break;
                 }
+                if (operation == AUDIO_OFFSET) {
+                    chanend_check_control_token(channel, XS1_CT_END);
+                    media_start_ms = (int)bytes;
+                    break;
+                }
                 if (operation != AUDIO_DATA || !bytes || bytes > AUDIO_CHUNK_BYTES) __builtin_trap();
                 for (unsigned i = 0; i < (bytes + 3) / 4; ++i)
                     payload[i] = chanend_in_word(channel);
@@ -320,4 +500,5 @@ void mp2_audio_task(chanend channel)
         pipeline_send(channel, stats, AUDIO_STATS_WORDS);
     }
 }
+#endif
 #endif

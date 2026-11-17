@@ -9,6 +9,7 @@
 #include "mpeg_pipeline.h"
 #include "activity_led.h"
 #include "audio_pipeline.h"
+#include "audio_dac.h"
 
 #include <spi.h>
 #include "lcd_display.h"
@@ -44,6 +45,9 @@ void main()
     {
 #if APP_XUH_MSC_PLAYER_MPEG_AUDIO
         on tile[1]: mp2_audio_task(c_audio);
+#if APP_XUH_MSC_PLAYER_AUDIO_DAC
+        on tile[1]: audio_dac_task();
+#endif
 #endif
 #if APP_XUH_MSC_PLAYER_ACTIVITY_LED
         /* The writers are on tile 0 and the LEDs on tile 1. */

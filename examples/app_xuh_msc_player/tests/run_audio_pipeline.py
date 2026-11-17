@@ -10,6 +10,8 @@ def main():
     parser.add_argument("--xe", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--adapter-id", help="Use attached hardware; otherwise simulate")
+    parser.add_argument("--dac", action="store_true",
+                        help="Require the DAC queue/mailbox fixture (build with TEST_AUDIO_DAC=ON)")
     parser.add_argument("--timeout", type=float, default=120)
     args = parser.parse_args()
     if args.timeout <= 0:
@@ -53,8 +55,9 @@ def main():
         (work / "run.log").write_text(output)
         failed = result.returncode != 0
         print(output, end="")
-    if failed or "PASS: audio pipeline 10 cases;" not in output:
-        raise SystemExit("Audio pipeline did not complete all ten cases")
+    marker = "PASS: DAC audio pipeline 8 cases;" if args.dac else "PASS: audio pipeline 10 cases;"
+    if failed or marker not in output:
+        raise SystemExit("Audio pipeline did not complete the selected fixture")
 
 
 if __name__ == "__main__":
