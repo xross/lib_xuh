@@ -68,23 +68,23 @@ void video_loader_report(unsigned number, const video_play_t *play)
            (stats[PIPELINE_FIRST_COMPLETE] - play->start) / 100);
     printf("Average stage times (us per frame; overlapping stages are not additive):\n");
     printf("  %-24s %-9s %s\n", "Stage", "Tile", "us/frame");
-    printf("  %-24s %-9s %u\n", "Load", "1", (unsigned)(play->load_us / frames));
+    printf("  %-24s %-9s %u\n", "Load", "0", (unsigned)(play->load_us / frames));
 #if MSC_MPEG_PIPELINE
-    printf("  %-24s %-9s %u\n", "Wait for loader", "1", stats[MPEG_INPUT_WAIT_US] / frames);
-    printf("  %-24s %-9s %u\n", "Feed", "1", stats[MPEG_FEED_US] / frames);
+    printf("  %-24s %-9s %u\n", "Wait for loader", "0", stats[MPEG_INPUT_WAIT_US] / frames);
+    printf("  %-24s %-9s %u\n", "Feed", "0", stats[MPEG_FEED_US] / frames);
 #endif
-    printf("  %-24s %-9s %u\n", "Decode", "1", stats[PIPELINE_DECODE_TICKS] / frames);
-    printf("  %-24s %-9s %u\n", "Transmit / ack wait", "1 -> 0", stats[PIPELINE_TRANSFER_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Decode", "0", stats[PIPELINE_DECODE_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Transmit / ack wait", "0 -> 1", stats[PIPELINE_TRANSFER_TICKS] / frames);
 #if MSC_MPEG_PIPELINE
     /* These split the handoff above; do not add them to the total again. */
-    printf("  %-24s %-9s %u\n", "  Send YUV / backpressure", "1 -> 0", stats[MPEG_SEND_US] / frames);
-    printf("  %-24s %-9s %u\n", "  Wait receiver ack", "1", stats[MPEG_ACK_WAIT_US] / frames);
-    printf("  %-24s %-9s %u\n", "Receive YUV / wait", "0", stats[PIPELINE_RECEIVE_TICKS] / frames);
-    printf("  %-24s %-9s %u\n", "YUV -> RGB565", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
-    printf("  %-24s %-9s %u\n", "Wait previous LCD", "0", stats[PIPELINE_RENDER_WAIT_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "  Send YUV / backpressure", "0 -> 1", stats[MPEG_SEND_US] / frames);
+    printf("  %-24s %-9s %u\n", "  Wait receiver ack", "0", stats[MPEG_ACK_WAIT_US] / frames);
+    printf("  %-24s %-9s %u\n", "Receive YUV / wait", "1", stats[PIPELINE_RECEIVE_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "YUV -> RGB565", "1", stats[PIPELINE_CONVERT_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Wait previous LCD", "1", stats[PIPELINE_RENDER_WAIT_TICKS] / frames);
 #else
-    printf("  %-24s %-9s %u\n", "Receive / RGB565 convert", "0", stats[PIPELINE_CONVERT_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "Receive / RGB565 convert", "1", stats[PIPELINE_CONVERT_TICKS] / frames);
 #endif
-    printf("  %-24s %-9s %u\n", "LCD SPI", "0", stats[PIPELINE_RENDER_TICKS] / frames);
+    printf("  %-24s %-9s %u\n", "LCD SPI", "1", stats[PIPELINE_RENDER_TICKS] / frames);
 }
 #endif

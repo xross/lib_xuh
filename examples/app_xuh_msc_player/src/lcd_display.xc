@@ -44,12 +44,14 @@
 #define RGB565_BLACK     0x0000
 #define RGB565_YELLOW    0xFFE0
 
-extern out port p_lcd_dc;
-extern out port p_lcd_rst;
+/* D/C and reset share one 4-bit port: reset stays high once the panel is up. */
+extern out port p_lcd_control;
+#define LCD_CONTROL_DC    1
+#define LCD_CONTROL_RESET 2
 
 static void lcd_set_dc(unsigned data)
 {
-    p_lcd_dc <: data;
+    p_lcd_control <: LCD_CONTROL_RESET | (data ? LCD_CONTROL_DC : 0);
 }
 
 static void lcd_write_byte(client spi_master_if spi, unsigned data, unsigned is_data)
@@ -139,11 +141,10 @@ static void lcd_init_st7789v(client spi_master_if spi)
 
 static void lcd_reset(void)
 {
-    p_lcd_dc <: 0;
-    p_lcd_rst <: 0;
+    p_lcd_control <: 0;
     delay_milliseconds(20);
 
-    p_lcd_rst <: 1;
+    p_lcd_control <: LCD_CONTROL_RESET;
     delay_milliseconds(150);
 }
 
@@ -274,7 +275,7 @@ static void lcd_render_pipeline(client spi_master_if spi, chanend c_render)
 #endif
             continue;
         }
-        /* Slot and sequence are checked before accessing shared tile-0 RAM. */
+        /* Slot and sequence are checked before accessing shared display-tile RAM. */
         if (sequence != expected || slot != (sequence & 1)) __builtin_trap();
         ++expected;
         unsigned start, end;

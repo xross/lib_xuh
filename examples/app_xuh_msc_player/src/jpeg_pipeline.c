@@ -9,14 +9,14 @@
 #include "jpeg.h"
 #include "fps_overlay.h"
 
-/* Tile 1: double-buffered compressed input, single full-screen RGB output.
+/* Decoder tile: double-buffered compressed input, single full-screen RGB output.
  * Only the loader writes input, only the decoder writes RGB.
  * Slot ownership is transferred by the ready/free channel messages. */
 static unsigned char jpeg_input[2][PIPELINE_INPUT_BYTES] __attribute__((aligned(4)));
 static unsigned char jpeg_rgb[PIPELINE_RGB_BYTES] __attribute__((aligned(4)));
 static unsigned char jpeg_work[JPEG_DECODE_WORK_SIZE] __attribute__((aligned(4)));
 
-/* Tile 0: the receiver fills one slot while the LCD task renders the other. */
+/* Display tile: the receiver fills one slot while the LCD task renders the other. */
 static unsigned char lcd_frames[2][PIPELINE_LCD_HEIGHT * PIPELINE_LCD_WIDTH * 2];
 
 #if PIPELINE_VERIFY

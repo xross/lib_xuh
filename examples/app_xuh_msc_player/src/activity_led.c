@@ -110,7 +110,7 @@ void activity_led_decode(unsigned flags) { publish_word(&decode_word, flags); }
 
 void activity_led_task(void)
 {
-    const port_t port = XS1_PORT_32A; /* Tile 1: bit 0 green, bit 1 red. */
+    const port_t port = XS1_PORT_32A; /* Board tile 1: bit 0 green, bit 1 red. */
     const unsigned invert = APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW ? 3u : 0u;
     activity_led_effect_t effect = {{0, 0}, {0, 0}, 0, 0, 0, 0, 0};
     activity_led_edge_t edges[3];

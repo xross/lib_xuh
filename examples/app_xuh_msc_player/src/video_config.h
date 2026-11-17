@@ -17,7 +17,7 @@
 
 /* Player settings. Change them here, not in CMake.
  *
- * Memory given to the video decoder on tile 1 when playback is paced to audio.
+ * Memory given to the video decoder when playback is paced to audio.
  * lib_mpeg divides it between the pictures and compressed input; the input
  * part is where video waits for its audio. This default completed the
  * reference 320x180 program stream. Video-only and unpaced builds use the

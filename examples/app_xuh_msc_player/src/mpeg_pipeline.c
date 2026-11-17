@@ -61,9 +61,9 @@ void mpeg_pipeline_audio_clock(unsigned offset, unsigned valid)
     audio_clock_valid = valid;
 }
 
-/* Tile 1: two filesystem input chunks (one being read ahead while the other is
+/* Decoder tile: two filesystem input chunks (one being read ahead while the other is
  * fed), plus the memory passed to lib_mpeg.
- * Tile 0: two RGB565 framebuffers and one two-row YUV strip. No RGB888 frame. */
+ * Display tile: two RGB565 framebuffers and one two-row YUV strip. No RGB888 frame. */
 static unsigned char input[2][MPEG_LOAD_BYTES] __attribute__((aligned(4)));
 static unsigned char lcd_frames[2][PIPELINE_LCD_WIDTH * PIPELINE_LCD_HEIGHT * 2] __attribute__((aligned(4)));
 static unsigned strip[PIPELINE_LCD_WIDTH * 3 / 4];
@@ -72,7 +72,7 @@ static video_window_t lcd_windows[2];
 static unsigned lcd_video_ms[2];
 unsigned mpeg_pipeline_lcd_video_ms(unsigned slot) { return lcd_video_ms[slot]; }
 #endif
-/* Decoder memory, owned by tile 1. Only paced playback opts into a larger
+/* Decoder memory, owned by the decoder tile. Only paced playback opts into a larger
  * application arena; video-only/unpaced builds retain the library default. */
 static unsigned char video_memory[MPEG_PACED ? APP_XUH_MSC_PLAYER_MPEG_ARENA_BYTES :
                                              MPEG_VIDEO_MEMORY_SIZE] __attribute__((aligned(8)));
@@ -117,9 +117,9 @@ static void send_row(chanend c_image, const unsigned char *row, unsigned bytes)
     }
 }
 
-/* Send decoded planar YUV420 from tile 1 to the tile-0 receiver.
+/* Send decoded planar YUV420 from the decoder tile to the receiver.
  * Each payload word carries four 8-bit Y, Cb or Cr samples, not RGB pixels.
- * Tile 0 converts each two-row strip to RGB565. Wait for its acknowledgement
+ * The display tile converts each two-row strip to RGB565. Wait for its acknowledgement
  * before decoding can reuse the source planes. This handoff can block on
  * reception/conversion and on the receiver waiting for the LCD renderer. */
 static void send_frame(chanend c_image, const mpeg_frame_t *frame,
@@ -134,7 +134,7 @@ static void send_frame(chanend c_image, const mpeg_frame_t *frame,
     chanend_out_word(c_image, frame->frame_rate_num);
     chanend_out_word(c_image, frame->frame_rate_den);
     /* Transfer two Y rows plus their Cb/Cr row. Decoder-owned planes remain
-     * valid until tile 0 acknowledges staging; only then may decode continue. */
+     * valid until the receiver acknowledges staging; only then may decode continue. */
     for (unsigned y = 0; y < frame->height; y += 2) {
         send_row(c_image, frame->plane[0] + y * frame->stride[0], frame->width);
         send_row(c_image, frame->plane[0] + (y + 1) * frame->stride[0], frame->width);
@@ -142,7 +142,7 @@ static void send_frame(chanend c_image, const mpeg_frame_t *frame,
         send_row(c_image, frame->plane[2] + (y / 2) * frame->stride[2], frame->width / 2);
     }
     chanend_out_control_token(c_image, XS1_CT_END);
-    /* This includes channel backpressure while tile 0 receives/converts.
+    /* This includes channel backpressure while the receiver receives/converts.
      * Separate it from the final acknowledgement, which may wait for LCD. */
     unsigned sent = get_reference_time();
     unsigned ack;
@@ -489,7 +489,7 @@ static void receive_play(chanend c_image, chanend c_render)
 #if PIPELINE_VERIFY
         lcd_hash[slot] = hash_bytes(lcd_frames[slot], sizeof(lcd_frames[slot]));
 #endif
-        /* YUV is now fully consumed. Release tile 1 before waiting for LCD;
+        /* YUV is now fully consumed. Release the decoder before waiting for LCD;
          * the next send will backpressure until this RGB slot is published.
          * Sequence zero retains its first-display-complete handshake below. */
         if (sequence) pipeline_send(c_image, &sequence, 1);

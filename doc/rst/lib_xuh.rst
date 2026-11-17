@@ -47,8 +47,8 @@ default control endpoint; the others are for class drivers.
     {
         chan c_out[NUM_EPS], c_in[NUM_EPS];
         par {
-            on tile[1]: XUH_Manager(c_out, NUM_EPS, c_in, NUM_EPS);
-            on tile[1]: UsbHost(c_out, NUM_EPS, c_in, NUM_EPS);
+            on tile[0]: XUH_Manager(c_out, NUM_EPS, c_in, NUM_EPS);
+            on tile[0]: UsbHost(c_out, NUM_EPS, c_in, NUM_EPS);
         }
         return 0;
     }
@@ -314,8 +314,8 @@ benchmark configuration:
      - ``ON``
      - Draw a smoothed measured-FPS gauge with the MPEG source-rate target
    * - ``APP_XUH_MSC_PLAYER_ACTIVITY_LED``
-     - ``ON`` on AIV
-     - Enable the activity/status LED task
+     - ``OFF``
+     - Activity/status LED task; not available in the player (see below)
    * - ``APP_XUH_MSC_PLAYER_LED_ACTIVE_LOW``
      - ``OFF``
      - Invert LED outputs for active-low wiring
@@ -365,29 +365,34 @@ LCD connection
 
 Both supported controllers are 240 x 320 panels used in 320 x 240 landscape.
 The controller is selected at build time, not detected from hardware. MISO is
-unused; connect the LCD and XU316 grounds together.
+unused; connect the LCD and XU316 grounds together. The USB host runs on tile 0
+and the LCD is driven from tile 1, on J3 pins that a directly fitted DAC SHIM
+does not use.
 
-.. list-table:: Tile-0 LCD pins
+.. list-table:: Tile-1 LCD pins
    :header-rows: 1
 
    * - Signal
      - xcore port
      - Device pin
    * - SCLK
-     - ``XS1_PORT_1L``
-     - ``X0D35``
-   * - MOSI
      - ``XS1_PORT_1M``
-     - ``X0D36``
-   * - CS
+     - ``X1D36``
+   * - MOSI
      - ``XS1_PORT_1N``
-     - ``X0D37``
-   * - DC
+     - ``X1D37``
+   * - CS
      - ``XS1_PORT_1O``
-     - ``X0D38``
+     - ``X1D38``
+   * - DC
+     - ``XS1_PORT_4F`` bit 0
+     - ``X1D28``
    * - RST
-     - ``XS1_PORT_1P``
-     - ``X0D39``
+     - ``XS1_PORT_4F`` bit 1
+     - ``X1D29``
+
+The LCD task owns all of port 4F, so ``X1D30`` and ``X1D31`` must stay
+unconnected.
 
 .. figure:: img/board_lcd.png
    :width: 100%
@@ -492,7 +497,7 @@ independent of the target rate.
 
 The program-stream player supports MPEG-1 pack/PES headers, video stream 0xe0
 and MP2 audio stream 0xc0. It skips other packet types and rejects MPEG-2 pack
-headers. MP2 PCM is decoded on tile 0 and discarded; there is no physical audio
+headers. MP2 PCM is decoded on tile 1 and discarded; there is no physical audio
 output. By default the audio task consumes blocks at their sample rate as a
 stand-in for playback. Video is paced against this clock, using the initial PES
 timestamps to relate the stream starts. This is an experimental timing path,
@@ -541,7 +546,7 @@ refresh delay is not included.
 
 Edit ``src/video_config.h`` to change the arena budget; it is not a CMake cache
 option.
-The 400-KiB arena spends another 16 KiB of tile-1 RAM compared with the library
+The 400-KiB arena spends another 16 KiB of tile-0 RAM compared with the library
 default and provides about 129 KiB of compressed input for 320 x 180 pictures. The
 larger arena applies only to paced audio/video builds, not library defaults or
 video-only/unpaced storage. Check the link report and stack caveats before
@@ -588,9 +593,9 @@ the player does not read the host-side ``data/`` directory.
 Pipeline and ownership
 ----------------------
 
-Tile 1 owns the USB manager, FatFs/read-ahead loader and video decoder. Tile 0
+Tile 0 owns the USB manager, FatFs/read-ahead loader and video decoder. Tile 1
 owns the pixel receiver/converter, LCD renderer and SPI master. The optional MP2
-decoder also runs on tile 0; the activity LED runs on tile 1.
+decoder also runs on tile 1.
 
 ``src/video_loader.c`` provides the shared, storage-independent loader. A source
 returns either one complete JPEG frame or an MPEG chunk of at most 4096 bytes.
@@ -599,17 +604,17 @@ Ready messages carry slot/sequence/size; acknowledgements explicitly release
 ownership and apply bounded backpressure. Stop/error messages drain pending
 work, and workers remain alive between plays.
 
-For MJPEG, tile 1 has two 30-KiB compressed slots and one 230400-byte RGB888
+For MJPEG, tile 0 has two 30-KiB compressed slots and one 230400-byte RGB888
 buffer. Decode and RGB transmission do not overlap; file loading and LCD output
-can overlap decoding. Tile 0 converts received pixels into two 153600-byte
+can overlap decoding. Tile 1 converts received pixels into two 153600-byte
 RGB565 framebuffers, allowing receive/conversion to overlap rendering.
 
-For MPEG, tile 1 has two 4096-byte loader slots and a 384-KiB decoder arena
+For MPEG, tile 0 has two 4096-byte loader slots and a 384-KiB decoder arena
 (400 KiB for paced audio/video by default).
 The decoder/transmitter sends each picture as two-row YUV420 strips using the
-library plane strides. Tile 0 converts a 960-byte strip directly into one of its
+library plane strides. Tile 1 converts a 960-byte strip directly into one of its
 two RGB565 framebuffers; no full RGB888 or extra YUV framebuffer is allocated.
-Once conversion, overlay and optional hashing finish, tile 0 acknowledges YUV
+Once conversion, overlay and optional hashing finish, tile 1 acknowledges YUV
 ownership before waiting for the previous LCD render. The next send backpressures
 until a safe RGB slot is available. Frame zero waits for the first LCD completion;
 EOF drains the final render before statistics return.
@@ -621,9 +626,9 @@ be reused only after rendering completes. Multi-sector READ(10) commands serve
 FatFs reads, with at most 64 512-byte sectors per command. Display work and
 filesystem reads do not execute inside the USB manager.
 
-The large memory model is required. A default MPEG-1 build uses 332516 bytes on
-tile 0 and 482692 bytes on tile 1, including code, data and reserved stacks;
-41596 bytes remain on tile 1. These are build-dependent figures, not an SRAM
+The large memory model is required. A default MPEG-1 build uses 478412 bytes on
+tile 0 and 333700 bytes on tile 1, including code, data and reserved stacks;
+45876 bytes remain on tile 0. These are build-dependent figures, not an SRAM
 budget for arbitrary additions. The decoder's 16-KiB stack reservation is
 provisional because callback branches prevent complete automatic analysis.
 
@@ -631,6 +636,10 @@ Activity/status LED
 -------------------
 
 On the example hardware, tile-1 port 32A bits 0 and 1 drive active-high green and red LEDs.
+The LED task reads words published, without a channel, by the USB host and the
+decoder, so it must share their tile. In the player those run on tile 0, so the
+player cannot drive the LED and rejects ``APP_XUH_MSC_PLAYER_ACTIVITY_LED=ON``.
+The task and its tests remain; the effect is as follows.
 Idle is dim green breathing; storage operations pulse green, decoding adds red,
 and completed frames trigger rate-limited red accents. Reported errors latch a
 double-red-flash pattern until reset. A blocked USB operation remains busy:
@@ -683,37 +692,37 @@ build with ``-DAPP_XUH_MSC_PLAYER_MPEG_FILE=VIDEO.MPG`` when measuring.
      - Tile
      - Time
    * - Load
-     - 1
+     - 0
      - 1.884
    * - Wait for loader
-     - 1
+     - 0
      - 0.500
    * - Feed
-     - 1
+     - 0
      - 0.097
    * - Decode
-     - 1
+     - 0
      - 19.137
    * - Transmit / acknowledgement wait
-     - 1 to 0
+     - 0 to 1
      - 10.014
    * - Receive YUV / wait
-     - 0
+     - 1
      - 1.310
    * - YUV to RGB565
-     - 0
+     - 1
      - 5.766
    * - Wait previous LCD
-     - 0
+     - 1
      - 6.318
    * - LCD SPI
-     - 0
+     - 1
      - 25.471
 
 Wait/feed/decode/handoff run serially on the decoder task and occupy about
 29.7 ms/frame. Loading, receive/conversion and LCD output overlap other stages;
 do not add them as independent costs. Send time includes blocked channel output
-while tile 0 converts or waits for a buffer; it is not pure link bandwidth.
+while tile 1 converts or waits for a buffer; it is not pure link bandwidth.
 The 25.471-ms LCD transaction gives an approximately 39.3-FPS display ceiling,
 but the whole player is not at that ceiling.
 

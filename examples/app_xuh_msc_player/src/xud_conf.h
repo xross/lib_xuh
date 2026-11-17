@@ -1,2 +1,2 @@
 
-#define USB_TILE tile[1]
+#define USB_TILE tile[0]
