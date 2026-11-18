@@ -4,7 +4,8 @@
 #define USB_PIDn_SOF                    0xa5
 #define USB_PIDn_ACK                    0xd2
 #define USB_PIDn_NAK                    0x5a
-#define USB_PIDn_NYET                   0x1e
+#define USB_PIDn_NYET                   0x96
+#define USB_PIDn_STALL                  0x1e
 
 #define HS 1
 
@@ -333,11 +334,14 @@ DoneTail:
                                     // TODO: Check for valid ACK (could be STALL or NAK or NYET)
 
     shr     r11, r11, 24
+    ldc     r9, USB_PIDn_STALL      // Trap on STALL: it is not handled
+    eq      r9, r9, r11
+    ecallt  r9
     ldc     r9, USB_PIDn_NAK        // TODO rather than checking for not NACK, check for PID expected?
     eq      r9, r9, r11
     bt      r9, XUH_OutNak
 
-    ///ldc     r9, USB_PIDn_NYET
+    //ldc     r9, USB_PIDn_NYET
     //eq      r9, r9, r11
     //bt      r9, XUH_OutNak
 
@@ -469,6 +473,9 @@ EpReady_In_OutputToken:
     inpw    r9, res[r0], 8        // TODO: Timeout
 
     shr     r9, r9, 24
+    ldc     r8, USB_PIDn_STALL   // Trap on STALL: it is not handled
+    eq      r8, r9, r8
+    ecallt  r8
     ldc     r8, USB_PIDn_NAK     // TODO rather than checking for not NACK, check for PID expected?
     eq     r9, r9, r8
     bf      r9, GotData
