@@ -1,5 +1,7 @@
 lib_xuh change log
 ==================
 
-UNRELEASED
-----------
+0.1.0
+-----
+
+  * Initial release

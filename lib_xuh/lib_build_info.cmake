@@ -1,6 +1,6 @@
 set(LIB_NAME lib_xuh)
 
-set(LIB_VERSION 0.0.1)
+set(LIB_VERSION 0.1.0)
 
 set(LIB_INCLUDES api src)
 
