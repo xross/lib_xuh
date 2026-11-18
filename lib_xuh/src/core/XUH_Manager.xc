@@ -464,52 +464,68 @@ void XUH_Manager(chanend c_ep_out[], unsigned epChanCount_out,
     t :> time;
     t when timerafter(time+5000) :> void; // 40 uS
 
-    // Drive SE0 on the bus (D+ and D- connected to ground via 45ohm resistors)
-    // Set opmode to 0b10 for connrect chirp transmit and receive
-    // OpMode: 0b10, TermSelect and XcvrSelect 0
-#ifdef __XS2A__
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x2);
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
-    write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
-#else
-    xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x2, 0, 0));
-#endif
-
-    /* Wait for chirp K from device to signal high-speed */
-    flag1_port when pinseq(1) :> void;
-
-    /* Wait for end of K chirp from device.. */
-    flag1_port when pinseq(0) :> void;
-
-    t :> time;
-    t when timerafter(time+5000) :> void; // 40 uS
-
-    clearbuf(p_usb_txd);
-
-    /* Chirp back to device */
-#define HOST_CHIRP_LENGTH 700
-    for(int i = 0; i< 30; i++)
+    /* Reset the bus twice. Some memory sticks (seen with a generic abcd:1234
+     * stick) answer the first reset after a warm re-attach with a chirp and
+     * ACK the first SETUP, but then NAK its data stage indefinitely; transfers
+     * have no timeout, so enumeration would hang. A second reset recovered
+     * that stick in every test. Windows also resets twice during enumeration
+     * (reset, GET_DESCRIPTOR, reset), so devices are used to it. */
+    for (int resetCount = 0; resetCount < 2; resetCount++)
     {
-        for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
-            p_usb_txd <: 0x0;
+        if (resetCount)
+        {
+            /* High-speed idle before the second reset */
+            t :> time;
+            t when timerafter(time+100000) :> void; // 1 ms
+        }
 
-        for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
-            p_usb_txd <: 0xffffffff;
-    }
-
-    t :> time;
-    t when timerafter(time+5000) :> void; // 40 uS
-
-    /* Go into HS operation */
+        // Drive SE0 on the bus (D+ and D- connected to ground via 45ohm resistors)
+        // Set opmode to 0b10 for connrect chirp transmit and receive
+        // OpMode: 0b10, TermSelect and XcvrSelect 0
 #ifdef __XS2A__
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x0); // OPMODE_0
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
-    settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
-    write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x2);
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
+        write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
 #else
-    xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x0, 0, 0));
+        xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x2, 0, 0));
 #endif
+
+        /* Wait for chirp K from device to signal high-speed */
+        flag1_port when pinseq(1) :> void;
+
+        /* Wait for end of K chirp from device.. */
+        flag1_port when pinseq(0) :> void;
+
+        t :> time;
+        t when timerafter(time+5000) :> void; // 40 uS
+
+        clearbuf(p_usb_txd);
+
+        /* Chirp back to device */
+#define HOST_CHIRP_LENGTH 700
+        for(int i = 0; i< 30; i++)
+        {
+            for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
+                p_usb_txd <: 0x0;
+
+            for(int j = 0; j < HOST_CHIRP_LENGTH; j++)
+                p_usb_txd <: 0xffffffff;
+        }
+
+        t :> time;
+        t when timerafter(time+5000) :> void; // 40 uS
+
+        /* Go into HS operation */
+#ifdef __XS2A__
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_OPMODE_SET(0, 0x0); // OPMODE_0
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_TERMSELECT_SET(settings[0], 0);
+        settings[0] = XS1_SU_UIFM_FUNC_CONTROL_XCVRSELECT_SET(settings[0], 0);
+        write_periph_32(xs1_su, XS1_SU_PER_UIFM_CHANEND_NUM, XS1_SU_PER_UIFM_FUNC_CONTROL_NUM, 1, settings);
+#else
+        xuh_xs3_write_usb_phy_cfg(xuh_xs3_usb_phy_cfg(0, 0, 0x0, 0, 0));
+#endif
+    }
 
 #if 0
     /* do some sofs... */

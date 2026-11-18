@@ -57,12 +57,20 @@ class BulkInDevice(SimThread):
         self.xsi.drive_periph_pin("XS1_USB_LS", 1)  # DP high: full-speed attach.
         self.until(lambda: self.xsi.sample_periph_pin("XS1_USB_XCVRSEL") == 0 and
                    self.xsi.sample_periph_pin("XS1_USB_TERMSEL") == 0, 500, "host reset")
+        self.chirp()
+        # XUH resets the bus twice. The second reset follows 1 ms of high-speed
+        # idle; its select pins match high-speed operation, so chirp after the
+        # idle rather than on a pin change.
+        self.wait_until(self.xsi.get_time() + 1_200_000_000_000)
+        self.chirp()
+        print("USB device: attach and host chirp complete")
+
+    def chirp(self):
         self.xsi.drive_periph_pin("XS1_USB_LS", 2)  # DM high: device chirp K.
         self.wait_until(self.xsi.get_time() + 10_000_000_000)
         self.xsi.drive_periph_pin("XS1_USB_LS", 0)
         chirp = self.receive(max_bytes=200_000)
         assert chirp and set(chirp) == {0x00, 0xff}, "Missing host K/J chirp response"
-        print("USB device: attach and host chirp complete")
 
     def send(self, packet):
         self.cycles(4)
